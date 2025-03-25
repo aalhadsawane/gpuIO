@@ -1,0 +1,22 @@
+Decision Tree Analysis
+==================================================
+
+Summary:
+Total configurations analyzed: 48
+GPU better: 26 cases
+CPU better: 22 cases
+
+Decision Rules:
+----------------
+Rule 1: IF Block Size (bytes) <= 262144.00 AND Dataset Size (GB) <= 1.00 AND I/O Threads <= 1.00 AND Block Size (bytes) <= 65536.00 THEN CPU Better
+Rule 2: IF Block Size (bytes) <= 262144.00 AND Dataset Size (GB) <= 1.00 AND I/O Threads <= 1.00 AND Block Size (bytes) > 65536.00 THEN GPU Better
+Rule 3: IF Block Size (bytes) <= 262144.00 AND Dataset Size (GB) <= 1.00 AND I/O Threads > 1.00 THEN CPU Better
+Rule 4: IF Block Size (bytes) <= 262144.00 AND Dataset Size (GB) > 1.00 AND I/O Threads <= 1.00 THEN CPU Better
+Rule 5: IF Block Size (bytes) <= 262144.00 AND Dataset Size (GB) > 1.00 AND I/O Threads > 1.00 AND Block Size (bytes) <= 65536.00 THEN GPU Better
+Rule 6: IF Block Size (bytes) <= 262144.00 AND Dataset Size (GB) > 1.00 AND I/O Threads > 1.00 AND Block Size (bytes) > 65536.00 THEN GPU Better
+Rule 7: IF Block Size (bytes) > 262144.00 AND I/O Threads <= 1.00 AND Dataset Size (GB) <= 1.00 AND I/O Mode <= 0.00 THEN GPU Better
+Rule 8: IF Block Size (bytes) > 262144.00 AND I/O Threads <= 1.00 AND Dataset Size (GB) <= 1.00 AND I/O Mode > 0.00 THEN CPU Better
+Rule 9: IF Block Size (bytes) > 262144.00 AND I/O Threads <= 1.00 AND Dataset Size (GB) > 1.00 THEN GPU Better
+Rule 10: IF Block Size (bytes) > 262144.00 AND I/O Threads > 1.00 AND I/O Mode <= 0.00 THEN CPU Better
+Rule 11: IF Block Size (bytes) > 262144.00 AND I/O Threads > 1.00 AND I/O Mode > 0.00 AND I/O Threads <= 4.00 THEN CPU Better
+Rule 12: IF Block Size (bytes) > 262144.00 AND I/O Threads > 1.00 AND I/O Mode > 0.00 AND I/O Threads > 4.00 THEN GPU Better

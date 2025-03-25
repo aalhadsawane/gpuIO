@@ -63,7 +63,8 @@ pip install -r requirements.txt
 > My plotting script is given as `plot.py` in source dir of repo. Please make a copy of it if u wanna edit it; dont change this one.
 #### Usage:
 
-```python
+```bash
+sudo apt-get install graphviz
 python plot.py
 ```
 
@@ -71,6 +72,8 @@ It will take the input csv as `CSV/Run*/raw_output.csv` which is the latest outp
 
 It will store all `PNG` images in `CSV/Run*/graphs`
 where `Run*` indicates latest Run.
+
+It will also make a decision tree as a `PDF` and a `txt` file defining rules of the decision tree in `CSV/RUN*`, 
 
 ###$ Custom csv path and output path:
 

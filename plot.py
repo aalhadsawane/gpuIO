@@ -10,6 +10,10 @@ import matplotlib as mpl
 import argparse
 import sys
 import glob
+import os
+
+# Import generate_decision_tree from make_decision_tree.py
+from make_decision_tree import generate_decision_tree
 
 def find_latest_run():
     # Get the CSV directory path
@@ -29,7 +33,7 @@ def find_latest_run():
 
 def get_data_path():
     # Set up argument parser
-    parser = argparse.ArgumentParser(description='Generate performance plots from benchmark data')
+    parser = argparse.ArgumentParser(description='Generate performance plots and decision tree from benchmark data')
     parser.add_argument('--data-path', type=str, help='Path to the raw_output.csv file')
     parser.add_argument('--output-dir', type=str, help='Directory to save the plots')
     args = parser.parse_args()
@@ -899,5 +903,15 @@ for dataset_size in df['dataset_size'].unique():
     plt.tight_layout()
     plt.savefig(output_dir / f'stripplot_by_threads_{dataset_size}.png', dpi=300)
     plt.close()
+
+# After all other plots are generated, always generate the decision tree
+try:
+    # Generate decision tree - use the run directory (parent of output_dir) for decision tree output
+    run_dir = output_dir.parent
+    generate_decision_tree(df, run_dir)
+    print("\nDecision tree analysis complete!")
+except Exception as e:
+    print(f"\nError generating decision tree: {e}")
+    print("Decision tree generation failed, but other plots were created successfully.")
 
 print(f"\nPlots have been saved to: {output_dir}")
