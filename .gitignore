@@ -2,7 +2,9 @@
 build/
 **/build/
 **/build/*
-
+benchmarks/ 
+Results/
+login.py
 # Compiled files
 *.o
 *.obj
