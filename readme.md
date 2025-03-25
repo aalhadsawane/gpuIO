@@ -2,6 +2,9 @@
 
 Just follow this readme and run the code snippets, everything is automated.
 
+>ALL data including raw CSV, graphs, decision tree PDFs, rules of the tree and node info for each experiment run are stored in the `CSV` folder of the repo.
+
+
 ### 0. directory structure
 
 This code assumes a user called `gpuio` is present in the`/home` directory.

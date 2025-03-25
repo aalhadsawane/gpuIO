@@ -13,6 +13,10 @@ login.py
 *.a
 *.so
 *.dylib
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
 
 # IDE specific files
 .vscode/
@@ -37,4 +41,6 @@ Thumbs.db
 
 # Dependencies
 deps/
-vendor/ 
+vendor/ __pycache__/
+*.py[cod]
+*.class
