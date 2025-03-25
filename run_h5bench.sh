@@ -50,6 +50,7 @@ echo "IO_THREADS: ${IO_THREADS[*]}"
 echo "BLOCK_SIZES: ${BLOCK_SIZES[*]}"
 echo "DATASET_SIZES: ${DATASET_SIZES[*]}"
 echo "MODES: ${MODES[*]}"
+echo "COMPUTE_TIME: ${COMPUTE_TIME:-4} (default: 4)"
 # Using only SYNC mode, removing IO_MODES entirely
 # echo "IO_MODES: ${IO_MODES[*]}"
 
@@ -68,6 +69,10 @@ export MPICH_MAX_THREAD_SAFETY="multiple"
 
 # Move to the build directory
 cd "$BUILD_DIR"
+
+# Clear existing Results directory
+echo "Clearing previous results from ${RESULTS_DIR}"
+rm -rf "${RESULTS_DIR}"/*
 
 # Create Results directory with capital R (as specified)
 mkdir -p "${RESULTS_DIR}"
@@ -126,9 +131,14 @@ for mode in "${MODES[@]}"; do
                 # Calculate bytes per thread
                 bytes_per_thread=$(echo "$dataset_bytes / $io_threads" | bc)
                 
+                # Set number of timesteps
+                timesteps=2
+                
                 # Calculate number of particles (elements)
-                # Assuming sizeof(double) = 8 bytes
-                num_particles=$(echo "$bytes_per_thread / 8" | bc)
+                # H5bench stores 8 values per particle (7 floats + 1 int), each 4 bytes = 32 bytes per particle
+                # To match the requested dataset size with multiple timesteps:
+                # num_particles = bytes_per_thread / (32 * timesteps)
+                num_particles=$(echo "$bytes_per_thread / (32 * $timesteps)" | bc)
                 
                 # Set dimensions ensuring NUM_PARTICLES = DIM_1 * DIM_2 * DIM_3
                 # Using 1D array with remaining dimensions as 1
@@ -137,8 +147,8 @@ for mode in "${MODES[@]}"; do
                 DIM_3=1
                 
                 # Calculate expected data size per process and total
-                # Each process will write num_particles * 8 bytes * 1 timestep
-                per_process_bytes=$(echo "$num_particles * 8" | bc)
+                # Each process will write num_particles * 32 bytes * timesteps
+                per_process_bytes=$(echo "$num_particles * 32 * $timesteps" | bc)
                 per_process_mb=$(echo "scale=2; $per_process_bytes / 1048576" | bc)
                 total_mb=$(echo "scale=2; $per_process_mb * $io_threads" | bc)
                 
@@ -149,8 +159,9 @@ for mode in "${MODES[@]}"; do
                 echo "  DIM_2 = $DIM_2"
                 echo "  DIM_3 = $DIM_3"
                 echo "  block_size = $block_size"
+                echo "  timesteps = $timesteps"
                 echo "  Expected data size per process: ~${per_process_bytes} bytes (~${per_process_mb} MB)"
-                echo "  Expected total data size: ~${total_mb} MB (${io_threads} processes × 1 timestep)"
+                echo "  Expected total data size: ~${total_mb} MB (${io_threads} processes × ${timesteps} timesteps)"
 
                 # For the simple approach with mpirun + h5bench_write
                 output_file="/home/gpuio/gpuIO/Results/output_${mode}_${io_threads}_${block_size}_${dataset_size}.h5"
@@ -170,7 +181,7 @@ IO_OPERATION=WRITE
 MEM_PATTERN=CONTIG
 FILE_PATTERN=CONTIG
 NUM_PARTICLES=${num_particles}
-TIMESTEPS=1
+TIMESTEPS=${timesteps}
 NUM_DIMS=3
 DIM_1=${DIM_1}
 DIM_2=${DIM_2}
@@ -178,11 +189,32 @@ DIM_3=${DIM_3}
 BLOCK_SIZE=${block_size}
 COLLECTIVE_DATA=YES
 COLLECTIVE_METADATA=YES
-TIMESTEP_COMPUTE_TIME=4
+EMULATED_COMPUTE_TIME_PER_TIMESTEP=${COMPUTE_TIME:-4s}
 EOF
 
-                # Ensure file has proper permissions
+                # Also create a JSON configuration file (for potential use later)
+                json_config="${run_dir}/h5bench.json"
+                cat > "$json_config" << EOF
+{
+  "IO_OPERATION": "WRITE",
+  "MEM_PATTERN": "CONTIG",
+  "FILE_PATTERN": "CONTIG",
+  "NUM_PARTICLES": "${num_particles}",
+  "TIMESTEPS": "${timesteps}",
+  "NUM_DIMS": "3",
+  "DIM_1": "${DIM_1}",
+  "DIM_2": "${DIM_2}",
+  "DIM_3": "${DIM_3}",
+  "BLOCK_SIZE": "${block_size}",
+  "COLLECTIVE_DATA": "YES",
+  "COLLECTIVE_METADATA": "YES",
+  "EMULATED_COMPUTE_TIME_PER_TIMESTEP": "${COMPUTE_TIME:-4s}"
+}
+EOF
+
+                # Ensure files have proper permissions
                 chmod 644 "$text_config"
+                chmod 644 "$json_config"
                 
                 # Check if h5bench_write exists and run the benchmark
                 if [ ! -f "./h5bench_write" ]; then
@@ -195,8 +227,11 @@ EOF
                 cat "$text_config"
                 echo ""
                 
-                # Run the benchmark using mpirun + h5bench_write
+                # Run the benchmark using mpirun + h5bench_write with the text config file
                 echo "Running benchmark: Mode=$mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
+                echo "Benchmark log will be saved to: ${log_file}"
+                echo "Configuration file: ${text_config}"
+                echo "Emulated compute time setting: ${COMPUTE_TIME:-4s} seconds"
                 echo "RUNNING: mpirun -n ${io_threads} ./h5bench_write ${text_config} ${output_file}"
                 mpirun -n ${io_threads} ./h5bench_write "${text_config}" "${output_file}" > "${log_file}" 2>&1
                 benchmark_status=$?
@@ -222,7 +257,7 @@ EOF
                 ranks="$io_threads"
                 raw_write_rate="0 MB/s"
                 observed_write_rate="0 MB/s"
-                compute_time="0"
+                compute_time="${COMPUTE_TIME:-4}"  # Use the configured compute time directly
                 write_size="0 MB"
                 raw_write_time="0"
                 metadata_time="0"
@@ -235,12 +270,41 @@ EOF
                 if [ -f "$log_file" ]; then
                     echo "Extracting metrics from log file"
                     
+                    # Check if the emulated compute time was properly recognized
+                    if grep -q "Emulated compute time per timestep" "$log_file"; then
+                        echo "✓ Emulated compute time setting was found in benchmark config"
+                        grep -i "Emulated compute time per timestep" "$log_file"
+                    else
+                        echo "⚠️ Emulated compute time setting was NOT found in benchmark output"
+                        echo "Checking benchmark configuration file format..."
+                        if grep -q "EMULATED_COMPUTE_TIME_PER_TIMESTEP" "$text_config"; then
+                            echo "✓ EMULATED_COMPUTE_TIME_PER_TIMESTEP=${COMPUTE_TIME:-4} is present in config file"
+                        else
+                            echo "❌ EMULATED_COMPUTE_TIME_PER_TIMESTEP is missing from config file"
+                        fi
+                    fi
+                    
+                    # Check if the total emulated compute time is reported
+                    if grep -q "Total emulated compute time" "$log_file"; then
+                        echo "✓ Total emulated compute time was reported in results"
+                        grep -i "Total emulated compute time" "$log_file"
+                        # Extract the reported compute time for comparison
+                        reported_compute_time=$(grep -i "Total emulated compute time:" "$log_file" | awk '{print $5}' || echo "0")
+                        if [ "$reported_compute_time" != "0" ] && [ "$reported_compute_time" != "0.000" ]; then
+                            echo "✓ Non-zero compute time detected: $reported_compute_time seconds"
+                        else
+                            echo "⚠️ Compute time is reported as zero despite configuration"
+                        fi
+                    else
+                        echo "❌ No total emulated compute time reported in results"
+                    fi
+                    
                     # Extract metrics if available
                     if grep -q "write rate" "$log_file"; then
                         echo "Performance metrics found in log file"
                         
                         # Try to extract key metrics
-                        compute_time=$(grep -i "Total emulated compute time:" "$log_file" | awk '{print $5}' || echo "0")
+                        # compute_time is now set directly from config, not extracted
                         write_size=$(grep -i "Total write size:" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB")
                         raw_write_time=$(grep -i "Raw write time:" "$log_file" | awk '{print $4}' || echo "0")
                         metadata_time=$(grep -i "Metadata time:" "$log_file" | awk '{print $3}' || echo "0")
@@ -253,7 +317,7 @@ EOF
                         ranks=$(grep -i "Total number of ranks" "$log_file" | awk '{print $5}' || echo "$io_threads")
                         
                         echo "Extracted metrics:"
-                        echo "  Compute time: $compute_time"
+                        echo "  Compute time (from config): $compute_time"
                         echo "  Write size: $write_size"
                         echo "  Raw write time: $raw_write_time"
                         echo "  Metadata time: $metadata_time"
