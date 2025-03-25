@@ -133,7 +133,8 @@ for mode in "${MODES[@]}"; do
                 
                 # Set number of timesteps
                 timesteps=2
-                
+                # set compute time
+                COMPUTE_TIME=4s
                 # Calculate number of particles (elements)
                 # H5bench stores 8 values per particle (7 floats + 1 int), each 4 bytes = 32 bytes per particle
                 # To match the requested dataset size with multiple timesteps:
@@ -312,8 +313,9 @@ EOF
                         h5fflush_time=$(grep -i "H5Fflush() time:" "$log_file" | awk '{print $3}' || echo "0")
                         h5fclose_time=$(grep -i "H5Fclose() time:" "$log_file" | awk '{print $3}' || echo "0")
                         completion_time=$(grep -i "Observed completion time:" "$log_file" | awk '{print $4}' || echo "0")
-                        raw_write_rate=$(grep -i "Raw write rate" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB/s")
-                        observed_write_rate=$(grep -i "Observed write rate" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB/s")
+                        # Capture the full write rate string including units
+                        raw_write_rate=$(grep -i "Raw write rate:" "$log_file" | sed 's/.*Raw write rate: *//' || echo "0 MB/s")
+                        observed_write_rate=$(grep -i "Observed write rate:" "$log_file" | sed 's/.*Observed write rate: *//' || echo "0 MB/s")
                         ranks=$(grep -i "Total number of ranks" "$log_file" | awk '{print $5}' || echo "$io_threads")
                         
                         echo "Extracted metrics:"
@@ -358,39 +360,61 @@ echo ""
 
 # For GPU mode
 echo "Top 3 GPU Raw Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" {gsub(/"/, "", $14); split($14, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+awk -F, 'NR>1 && $1=="GPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $14}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 echo ""
 echo "Top 3 GPU Observed Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" {gsub(/"/, "", $15); split($15, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+awk -F, 'NR>1 && $1=="GPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $15}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 # For CPU mode
 echo ""
 echo "Top 3 CPU Raw Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" {gsub(/"/, "", $14); split($14, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+awk -F, 'NR>1 && $1=="CPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $14}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 echo ""
 echo "Top 3 CPU Observed Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" {gsub(/"/, "", $15); split($15, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+awk -F, 'NR>1 && $1=="CPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $15}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 # Summary by thread count (average across all configurations)
 echo ""
 echo "Average Performance by Thread Count:"
-echo "Threads,Avg_Raw_Write_Rate,Avg_Observed_Write_Rate"
+echo "Threads,Raw_Write_Rates,Observed_Write_Rates"
 for threads in "${IO_THREADS[@]}"; do
-    avg_raw=$(awk -F, -v t="$threads" 'NR>1 && $2==t {gsub(/"/, "", $14); split($14, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    avg_obs=$(awk -F, -v t="$threads" 'NR>1 && $2==t {gsub(/"/, "", $15); split($15, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    echo "$threads,$avg_raw,$avg_obs"
+    # Calculate number of samples for this thread count
+    count=$(awk -F, -v t="$threads" 'NR>1 && $2==t {count++} END {print (count>0 ? count : 0)}' "$output_csv")
+    
+    # Skip if no samples
+    if [ "$count" -eq 0 ]; then
+        echo "$threads,No samples,No samples"
+        continue
+    fi
+    
+    # List all raw rates for this thread count (preserving units)
+    raw_rates=$(awk -F, -v t="$threads" 'NR>1 && $2==t {print $14}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    observed_rates=$(awk -F, -v t="$threads" 'NR>1 && $2==t {print $15}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    
+    echo "$threads,$raw_rates,$observed_rates"
 done
 
 # Summary by block size (average across all configurations)
 echo ""
 echo "Average Performance by Block Size:"
-echo "Block_Size,Avg_Raw_Write_Rate,Avg_Observed_Write_Rate"
+echo "Block_Size,Raw_Write_Rates,Observed_Write_Rates"
 for bs in "${BLOCK_SIZES[@]}"; do
-    avg_raw=$(awk -F, -v b="$bs" 'NR>1 && $3==b {gsub(/"/, "", $14); split($14, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    avg_obs=$(awk -F, -v b="$bs" 'NR>1 && $3==b {gsub(/"/, "", $15); split($15, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    echo "$bs,$avg_raw,$avg_obs"
+    # Calculate number of samples for this block size
+    count=$(awk -F, -v b="$bs" 'NR>1 && $3==b {count++} END {print (count>0 ? count : 0)}' "$output_csv")
+    
+    # Skip if no samples
+    if [ "$count" -eq 0 ]; then
+        echo "$bs,No samples,No samples"
+        continue
+    fi
+    
+    # List all raw rates for this block size (preserving units)
+    raw_rates=$(awk -F, -v b="$bs" 'NR>1 && $3==b {print $14}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    observed_rates=$(awk -F, -v b="$bs" 'NR>1 && $3==b {print $15}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    
+    echo "$bs,$raw_rates,$observed_rates"
 done
 
 echo ""

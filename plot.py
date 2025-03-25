@@ -106,18 +106,16 @@ y_max = 250  # Maximum GB/s to show on y-axis
 # ======== PLOT 1: Performance Heatmap with Raw Data Points ========
 # Create separate plots for each dataset size
 for dataset_size in df['dataset_size'].unique():
-    plt.figure(figsize=(14, 12))
+    plt.figure(figsize=(14, 10))
     
-    # Create a 2x2 grid of subplots for SYNC/ASYNC and GPU/CPU modes
-    fig, axs = plt.subplots(2, 2, figsize=(20, 16), sharex=True, sharey=True)
+    # Create subplots for GDS and CPU modes
+    fig, axs = plt.subplots(1, 2, figsize=(20, 10), sharex=True, sharey=True)
     fig.suptitle(f'Performance Heatmap: {dataset_size} Dataset', fontsize=20)
     
     # Define subplot locations
     positions = {
-        ('GDS', 'SYNC'): (0, 0),
-        ('GDS', 'ASYNC'): (0, 1),
-        ('CPU', 'SYNC'): (1, 0),
-        ('CPU', 'ASYNC'): (1, 1)
+        'GDS': 0,
+        'CPU': 1
     }
     
     # Define the color mapping for regular values (using percentiles)
@@ -131,12 +129,12 @@ for dataset_size in df['dataset_size'].unique():
     colors = [(1, 0, 0), (1, 0.5, 0)]  # Red to orange for > P95
     cmap_high = LinearSegmentedColormap.from_list('custom_high', colors, N=100)
     
-    # Process each mode and io_mode combination
-    for (mode, io_mode), (row, col) in positions.items():
-        ax = axs[row, col]
+    # Process each mode
+    for mode, col in positions.items():
+        ax = axs[col]
         
-        # Filter data for current mode, io_mode and dataset_size
-        mask = (df['mode'] == mode) & (df['io_mode'] == io_mode) & (df['dataset_size'] == dataset_size)
+        # Filter data for current mode and dataset_size
+        mask = (df['mode'] == mode) & (df['dataset_size'] == dataset_size)
         subset = df[mask]
         
         # Create unique identifier for each thread/block size combination
@@ -197,7 +195,7 @@ for dataset_size in df['dataset_size'].unique():
                 linewidth=1.5
             )
         
-        ax.set_title(f'{mode} {io_mode}', fontsize=16)
+        ax.set_title(f'{mode}', fontsize=16)
         ax.set_xlabel('Block Size (KB)', fontsize=14)
         ax.set_ylabel('I/O Threads', fontsize=14)
     
@@ -211,27 +209,26 @@ for dataset_size in df['dataset_size'].unique():
 # Find global min/max for consistent scale across all performance maps for differences
 all_diffs = []
 for dataset_size in df['dataset_size'].unique():
-    for io_mode in ['SYNC', 'ASYNC']:
-        subset = df[(df['io_mode'] == io_mode) & (df['dataset_size'] == dataset_size)]
-        
-        # Create pivot tables for GDS and CPU
-        gds_data = subset[subset['mode'] == 'GDS'].pivot_table(
-            values='observed_write_rate',
-            index='io_threads',
-            columns='block_size_kb',
-            aggfunc='mean'
-        )
-        
-        cpu_data = subset[subset['mode'] == 'CPU'].pivot_table(
-            values='observed_write_rate',
-            index='io_threads',
-            columns='block_size_kb',
-            aggfunc='mean'
-        )
-        
-        # Calculate performance difference (GDS - CPU)
-        diff_data = gds_data - cpu_data
-        all_diffs.append(diff_data)
+    subset = df[df['dataset_size'] == dataset_size]
+    
+    # Create pivot tables for GDS and CPU
+    gds_data = subset[subset['mode'] == 'GDS'].pivot_table(
+        values='observed_write_rate',
+        index='io_threads',
+        columns='block_size_kb',
+        aggfunc='mean'
+    )
+    
+    cpu_data = subset[subset['mode'] == 'CPU'].pivot_table(
+        values='observed_write_rate',
+        index='io_threads',
+        columns='block_size_kb',
+        aggfunc='mean'
+    )
+    
+    # Calculate performance difference (GDS - CPU)
+    diff_data = gds_data - cpu_data
+    all_diffs.append(diff_data)
 
 # Calculate percentile-based scale for differences
 flat_diffs = np.concatenate([d.values.flatten() for d in all_diffs])
@@ -242,79 +239,76 @@ diff_vmax = max(abs(diff_p5), abs(diff_p95))  # Symmetric scale based on percent
 print(f"Performance difference percentiles: P5={diff_p5:.2f}, P95={diff_p95:.2f}, vmax={diff_vmax:.2f}")
 
 for dataset_size in df['dataset_size'].unique():
-    # Create a figure with subplots for SYNC and ASYNC
-    fig, axs = plt.subplots(1, 2, figsize=(20, 8), sharey=True)
+    # Create a figure 
+    plt.figure(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
     fig.suptitle(f'GDS vs CPU Performance Comparison: {dataset_size} Dataset', fontsize=20)
     
-    for i, io_mode in enumerate(['SYNC', 'ASYNC']):
-        ax = axs[i]
-        
-        # Filter data for current io_mode and dataset_size
-        subset = df[(df['io_mode'] == io_mode) & (df['dataset_size'] == dataset_size)]
-        
-        # Create pivot tables for GDS and CPU
-        gds_data = subset[subset['mode'] == 'GDS'].pivot_table(
-            values='observed_write_rate',
-            index='io_threads',
-            columns='block_size_kb',
-            aggfunc='mean'
-        )
-        
-        cpu_data = subset[subset['mode'] == 'CPU'].pivot_table(
-            values='observed_write_rate',
-            index='io_threads',
-            columns='block_size_kb',
-            aggfunc='mean'
-        )
-        
-        # Calculate performance difference (GDS - CPU)
-        diff_data = gds_data - cpu_data
-        
-        # Create a custom diverging colormap with neutral center
-        colors = ['blue', 'lightblue', 'white', 'lightgreen', 'green']
-        cmap = LinearSegmentedColormap.from_list('custom_diverging', colors, N=256)
-        
-        # Use the percentile-based scale for symmetric color scaling
-        vmax = diff_vmax
-        
-        # Plot the performance difference
-        im = ax.imshow(diff_data, cmap=cmap, interpolation='nearest', 
-                     vmin=-vmax, vmax=vmax, aspect='auto')
-        
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label(f'GDS advantage (GB/s) [scale: ±{vmax:.2f} GB/s based on 5-95 percentiles]')
-        
-        # Add annotations with actual values, with special highlighting for outliers
-        for i in range(len(diff_data.index)):
-            for j in range(len(diff_data.columns)):
-                value = diff_data.iloc[i, j]
-                if not np.isnan(value):
-                    # Determine text color and style based on value
-                    if abs(value) > vmax:
-                        # Outlier - make it bold and add a marker
-                        text_color = 'black'
-                        fontweight = 'bold'
-                        value_text = f'{value:.1f}*'  # Add asterisk to highlight
-                    else:
-                        text_color = 'black'
-                        fontweight = 'normal'
-                        value_text = f'{value:.1f}'
-                        
-                    ax.text(j, i, value_text, 
-                           ha='center', va='center', 
-                           color=text_color, fontweight=fontweight)
-        
-        # Set tick labels
-        ax.set_xticks(range(len(diff_data.columns)))
-        ax.set_yticks(range(len(diff_data.index)))
-        ax.set_xticklabels([f'{x:.0f}' for x in diff_data.columns])
-        ax.set_yticklabels(diff_data.index)
-        
-        ax.set_title(f'{io_mode} I/O', fontsize=16)
-        ax.set_xlabel('Block Size (KB)', fontsize=14)
-        if i == 0:
-            ax.set_ylabel('I/O Threads', fontsize=14)
+    # Filter data for current dataset_size
+    subset = df[df['dataset_size'] == dataset_size]
+    
+    # Create pivot tables for GDS and CPU
+    gds_data = subset[subset['mode'] == 'GDS'].pivot_table(
+        values='observed_write_rate',
+        index='io_threads',
+        columns='block_size_kb',
+        aggfunc='mean'
+    )
+    
+    cpu_data = subset[subset['mode'] == 'CPU'].pivot_table(
+        values='observed_write_rate',
+        index='io_threads',
+        columns='block_size_kb',
+        aggfunc='mean'
+    )
+    
+    # Calculate performance difference (GDS - CPU)
+    diff_data = gds_data - cpu_data
+    
+    # Create a custom diverging colormap with neutral center
+    colors = ['blue', 'lightblue', 'white', 'lightgreen', 'green']
+    cmap = LinearSegmentedColormap.from_list('custom_diverging', colors, N=256)
+    
+    # Use the percentile-based scale for symmetric color scaling
+    vmax = diff_vmax
+    
+    # Plot the performance difference
+    im = ax.imshow(diff_data, cmap=cmap, interpolation='nearest', 
+                 vmin=-vmax, vmax=vmax, aspect='auto')
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(f'GDS advantage (GB/s) [scale: ±{vmax:.2f} GB/s based on 5-95 percentiles]')
+    
+    # Add annotations with actual values, with special highlighting for outliers
+    for i in range(len(diff_data.index)):
+        for j in range(len(diff_data.columns)):
+            value = diff_data.iloc[i, j]
+            if not np.isnan(value):
+                # Determine text color and style based on value
+                if abs(value) > vmax:
+                    # Outlier - make it bold and add a marker
+                    text_color = 'black'
+                    fontweight = 'bold'
+                    value_text = f'{value:.1f}*'  # Add asterisk to highlight
+                else:
+                    text_color = 'black'
+                    fontweight = 'normal'
+                    value_text = f'{value:.1f}'
+                    
+                ax.text(j, i, value_text, 
+                       ha='center', va='center', 
+                       color=text_color, fontweight=fontweight)
+    
+    # Set tick labels
+    ax.set_xticks(range(len(diff_data.columns)))
+    ax.set_yticks(range(len(diff_data.index)))
+    ax.set_xticklabels([f'{x:.0f}' for x in diff_data.columns])
+    ax.set_yticklabels(diff_data.index)
+    
+    ax.set_title(f'Performance Difference (GDS - CPU)', fontsize=16)
+    ax.set_xlabel('Block Size (KB)', fontsize=14)
+    ax.set_ylabel('I/O Threads', fontsize=14)
     
     # Add a detailed explanation of the color scale
     plt.figtext(0.5, 0.01, 
@@ -326,7 +320,7 @@ for dataset_size in df['dataset_size'].unique():
     plt.savefig(output_dir / f'gds_vs_cpu_comparison_{dataset_size}.png', dpi=300)
     plt.close()
 
-# ======== PLOT 3: Points Plot (formerly Bubble) with All Data Points ========
+# ======== PLOT 3: Points Plot with All Data Points ========
 # Fixed-size points with write speed on y-axis, block size on x-axis, and different markers for thread counts
 
 # For the point plots, use strict percentile-based y-axis range
@@ -334,187 +328,181 @@ y_padding = (p95 - p5) * 0.1  # 10% padding for visualization
 y_min = p5 - y_padding
 y_max = p95 + y_padding
 
-# No need to create a copy anymore since we already renamed in the original dataframe
-
 for dataset_size in df['dataset_size'].unique():
-    plt.figure(figsize=(18, 10))
+    plt.figure(figsize=(12, 10))
     
-    # Split by io_mode
-    for i, io_mode in enumerate(['SYNC', 'ASYNC']):
-        plt.subplot(1, 2, i+1)
-        
-        # Filter data
-        subset = df[(df['io_mode'] == io_mode) & (df['dataset_size'] == dataset_size)]
-        
-        # Identify outliers
-        outliers = subset[(subset['observed_write_rate'] < p5) | (subset['observed_write_rate'] > p95)]
-        regular_data = subset[(subset['observed_write_rate'] >= p5) & (subset['observed_write_rate'] <= p95)]
-        
-        # Markers for different thread counts
-        markers = {1: 'o', 2: 's', 4: '^', 8: 'd'}
-        
-        # Plot regular GDS data points - offset to the left
-        gds_data = regular_data[regular_data['mode'] == 'GDS']
-        for thread_count, marker in markers.items():
-            thread_data = gds_data[gds_data['io_threads'] == thread_count]
-            if not thread_data.empty:
-                plt.scatter(
-                    thread_data['block_size_kb'] - 50,  # fixed left offset
-                    thread_data['observed_write_rate'],
-                    s=100,
-                    color='blue',
-                    alpha=0.7,
-                    marker=marker,
-                    edgecolor='darkblue',
-                    linewidth=1,
-                    label=f'GDS {thread_count} Threads'
-                )
-        
-        # Plot regular CPU data points - offset to the right
-        cpu_data = regular_data[regular_data['mode'] == 'CPU']
-        for thread_count, marker in markers.items():
-            thread_data = cpu_data[cpu_data['io_threads'] == thread_count]
-            if not thread_data.empty:
-                plt.scatter(
-                    thread_data['block_size_kb'] + 50,  # fixed right offset
-                    thread_data['observed_write_rate'],
-                    s=100,
-                    color='red',
-                    alpha=0.7,
-                    marker=marker,
-                    edgecolor='darkred',
-                    linewidth=1,
-                    label=f'CPU {thread_count} Threads'
-                )
-        
-        # Add text labels for regular data points
-        for _, row in gds_data.iterrows():
-            plt.annotate(
-                f"{row['io_threads']}t", 
-                (row['block_size_kb'] - 50, row['observed_write_rate']),  # fixed offset
-                xytext=(-15, 0),
-                textcoords='offset points',
-                fontsize=8,
-                ha='right',
-                color='blue'
-            )
-        
-        for _, row in cpu_data.iterrows():
-            plt.annotate(
-                f"{row['io_threads']}t", 
-                (row['block_size_kb'] + 50, row['observed_write_rate']),  # fixed offset
-                xytext=(15, 0),
-                textcoords='offset points',
-                fontsize=8,
-                ha='left',
-                color='red'
-            )
-        
-        # Handle outliers with special markers and arrows
-        for _, row in outliers.iterrows():
-            # Determine position and color based on mode
-            if row['mode'] == 'GDS':
-                x_pos = row['block_size_kb'] - 50  # fixed offset
-                color = 'blue'
-                arrow_offset = -30  # Offset for text to the left
-                ha = 'right'
-            else:  # CPU
-                x_pos = row['block_size_kb'] + 50  # fixed offset
-                color = 'red'
-                arrow_offset = 30  # Offset for text to the right
-                ha = 'left'
-            
-            # Determine arrow direction and text position based on outlier type
-            if row['observed_write_rate'] > p95:
-                # High outlier - place at top with arrow pointing up
-                y_arrow_start = p95
-                y_arrow_end = p95 + y_padding * 0.7
-                arrow_style = '-|>'
-                y_text = p95 + y_padding * 0.8
-                text = f"{row['io_threads']}t: {row['observed_write_rate']:.1f} GB/s ↑"
-            else:
-                # Low outlier - place at bottom with arrow pointing down
-                y_arrow_start = p5
-                y_arrow_end = p5 - y_padding * 0.7
-                arrow_style = '-|>'
-                y_text = p5 - y_padding * 0.8
-                text = f"{row['io_threads']}t: {row['observed_write_rate']:.1f} GB/s ↓"
-            
-            # Add arrow
-            arrow = FancyArrowPatch(
-                (x_pos, y_arrow_start),
-                (x_pos, y_arrow_end),
-                arrowstyle=arrow_style,
-                color=color,
+    # Filter data
+    subset = df[df['dataset_size'] == dataset_size]
+    
+    # Identify outliers
+    outliers = subset[(subset['observed_write_rate'] < p5) | (subset['observed_write_rate'] > p95)]
+    regular_data = subset[(subset['observed_write_rate'] >= p5) & (subset['observed_write_rate'] <= p95)]
+    
+    # Markers for different thread counts
+    markers = {1: 'o', 2: 's', 4: '^', 8: 'd'}
+    
+    # Plot regular GDS data points - offset to the left
+    gds_data = regular_data[regular_data['mode'] == 'GDS']
+    for thread_count, marker in markers.items():
+        thread_data = gds_data[gds_data['io_threads'] == thread_count]
+        if not thread_data.empty:
+            plt.scatter(
+                thread_data['block_size_kb'] - 50,  # fixed left offset
+                thread_data['observed_write_rate'],
+                s=100,
+                color='blue',
                 alpha=0.7,
-                mutation_scale=12,
-                linewidth=1.5
+                marker=marker,
+                edgecolor='darkblue',
+                linewidth=1,
+                label=f'GDS {thread_count} Threads'
             )
-            plt.gca().add_patch(arrow)
-            
-            # Add text label
-            plt.annotate(
-                text,
-                (x_pos, y_text),
-                xytext=(arrow_offset, 0),
-                textcoords='offset points',
-                fontsize=8,
-                ha=ha,
-                va='center',
-                color=color,
-                fontweight='bold',
-                bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2')
+    
+    # Plot regular CPU data points - offset to the right
+    cpu_data = regular_data[regular_data['mode'] == 'CPU']
+    for thread_count, marker in markers.items():
+        thread_data = cpu_data[cpu_data['io_threads'] == thread_count]
+        if not thread_data.empty:
+            plt.scatter(
+                thread_data['block_size_kb'] + 50,  # fixed right offset
+                thread_data['observed_write_rate'],
+                s=100,
+                color='red',
+                alpha=0.7,
+                marker=marker,
+                edgecolor='darkred',
+                linewidth=1,
+                label=f'CPU {thread_count} Threads'
             )
-        
-        # Add gray connecting lines between related points for regular data
-        for thread in regular_data['io_threads'].unique():
-            for block in regular_data['block_size_kb'].unique():
-                # Find matching GDS and CPU data points
-                gds_point = gds_data[(gds_data['io_threads'] == thread) & (gds_data['block_size_kb'] == block)]
-                cpu_point = cpu_data[(cpu_data['io_threads'] == thread) & (cpu_data['block_size_kb'] == block)]
-                
-                if not gds_point.empty and not cpu_point.empty:
-                    plt.plot(
-                        [gds_point['block_size_kb'].values[0] - 50, cpu_point['block_size_kb'].values[0] + 50], 
-                        [gds_point['observed_write_rate'].values[0], cpu_point['observed_write_rate'].values[0]], 
-                        'gray', alpha=0.3, linestyle='--', linewidth=0.5
-                    )
-        
-        plt.title(f'{io_mode} I/O - {dataset_size} Dataset', fontsize=16)
-        plt.xlabel('Block Size', fontsize=14)
-        plt.ylabel('Write Speed (GB/s)', fontsize=14)
-        
-        # Set custom x-tick labels
-        plt.xticks(
-            [64, 256, 1024],  # Actual positions
-            ['64KB', '256KB', '1MB'],  # Custom labels
-            fontsize=12
+    
+    # Add text labels for regular data points
+    for _, row in gds_data.iterrows():
+        plt.annotate(
+            f"{row['io_threads']}t", 
+            (row['block_size_kb'] - 50, row['observed_write_rate']),  # fixed offset
+            xytext=(-15, 0),
+            textcoords='offset points',
+            fontsize=8,
+            ha='right',
+            color='blue'
         )
+    
+    for _, row in cpu_data.iterrows():
+        plt.annotate(
+            f"{row['io_threads']}t", 
+            (row['block_size_kb'] + 50, row['observed_write_rate']),  # fixed offset
+            xytext=(15, 0),
+            textcoords='offset points',
+            fontsize=8,
+            ha='left',
+            color='red'
+        )
+    
+    # Handle outliers with special markers and arrows
+    for _, row in outliers.iterrows():
+        # Determine position and color based on mode
+        if row['mode'] == 'GDS':
+            x_pos = row['block_size_kb'] - 50  # fixed offset
+            color = 'blue'
+            arrow_offset = -30  # Offset for text to the left
+            ha = 'right'
+        else:  # CPU
+            x_pos = row['block_size_kb'] + 50  # fixed offset
+            color = 'red'
+            arrow_offset = 30  # Offset for text to the right
+            ha = 'left'
         
-        # Set y-axis limits to exact P5-P95 range with padding
-        plt.ylim(y_min, y_max)
+        # Determine arrow direction and text position based on outlier type
+        if row['observed_write_rate'] > p95:
+            # High outlier - place at top with arrow pointing up
+            y_arrow_start = p95
+            y_arrow_end = p95 + y_padding * 0.7
+            arrow_style = '-|>'
+            y_text = p95 + y_padding * 0.8
+            text = f"{row['io_threads']}t: {row['observed_write_rate']:.1f} GB/s ↑"
+        else:
+            # Low outlier - place at bottom with arrow pointing down
+            y_arrow_start = p5
+            y_arrow_end = p5 - y_padding * 0.7
+            arrow_style = '-|>'
+            y_text = p5 - y_padding * 0.8
+            text = f"{row['io_threads']}t: {row['observed_write_rate']:.1f} GB/s ↓"
         
-        # Add reference lines at P5 and P95 with labels
-        plt.axhline(y=p5, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-        plt.text(plt.xlim()[0], p5, f'P5: {p5:.1f}', 
-                ha='left', va='bottom', fontsize=8, alpha=0.7)
+        # Add arrow
+        arrow = FancyArrowPatch(
+            (x_pos, y_arrow_start),
+            (x_pos, y_arrow_end),
+            arrowstyle=arrow_style,
+            color=color,
+            alpha=0.7,
+            mutation_scale=12,
+            linewidth=1.5
+        )
+        plt.gca().add_patch(arrow)
         
-        plt.axhline(y=p95, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-        plt.text(plt.xlim()[0], p95, f'P95: {p95:.1f}', 
-                ha='left', va='top', fontsize=8, alpha=0.7)
-        
-        # Add annotation explaining outliers
-        plt.figtext(0.5, 0.02, 
-            "Values outside P5-P95 range are shown with arrows and labeled with actual values.", 
-            ha='center', fontsize=10, 
-            bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.2'))
-        
-        plt.grid(True, alpha=0.3)
-        
-        # Create a custom legend with one entry per thread count and mode
-        handles, labels = plt.gca().get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        plt.legend(by_label.values(), by_label.keys(), title="Configuration", loc="upper right")
+        # Add text label
+        plt.annotate(
+            text,
+            (x_pos, y_text),
+            xytext=(arrow_offset, 0),
+            textcoords='offset points',
+            fontsize=8,
+            ha=ha,
+            va='center',
+            color=color,
+            fontweight='bold',
+            bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2')
+        )
+    
+    # Add gray connecting lines between related points for regular data
+    for thread in regular_data['io_threads'].unique():
+        for block in regular_data['block_size_kb'].unique():
+            # Find matching GDS and CPU data points
+            gds_point = gds_data[(gds_data['io_threads'] == thread) & (gds_data['block_size_kb'] == block)]
+            cpu_point = cpu_data[(cpu_data['io_threads'] == thread) & (cpu_data['block_size_kb'] == block)]
+            
+            if not gds_point.empty and not cpu_point.empty:
+                plt.plot(
+                    [gds_point['block_size_kb'].values[0] - 50, cpu_point['block_size_kb'].values[0] + 50], 
+                    [gds_point['observed_write_rate'].values[0], cpu_point['observed_write_rate'].values[0]], 
+                    'gray', alpha=0.3, linestyle='--', linewidth=0.5
+                )
+    
+    plt.title(f'Performance - {dataset_size} Dataset', fontsize=16)
+    plt.xlabel('Block Size', fontsize=14)
+    plt.ylabel('Write Speed (GB/s)', fontsize=14)
+    
+    # Set custom x-tick labels
+    plt.xticks(
+        [64, 256, 1024],  # Actual positions
+        ['64KB', '256KB', '1MB'],  # Custom labels
+        fontsize=12
+    )
+    
+    # Set y-axis limits to exact P5-P95 range with padding
+    plt.ylim(y_min, y_max)
+    
+    # Add reference lines at P5 and P95 with labels
+    plt.axhline(y=p5, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+    plt.text(plt.xlim()[0], p5, f'P5: {p5:.1f}', 
+            ha='left', va='bottom', fontsize=8, alpha=0.7)
+    
+    plt.axhline(y=p95, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+    plt.text(plt.xlim()[0], p95, f'P95: {p95:.1f}', 
+            ha='left', va='top', fontsize=8, alpha=0.7)
+    
+    # Add annotation explaining outliers
+    plt.figtext(0.5, 0.02, 
+        "Values outside P5-P95 range are shown with arrows and labeled with actual values.", 
+        ha='center', fontsize=10, 
+        bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.2'))
+    
+    plt.grid(True, alpha=0.3)
+    
+    # Create a custom legend with one entry per thread count and mode
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    plt.legend(by_label.values(), by_label.keys(), title="Configuration", loc="upper right")
     
     plt.tight_layout()
     plt.savefig(output_dir / f'point_plot_{dataset_size}.png', dpi=300)
@@ -533,16 +521,17 @@ for dataset_size in df['dataset_size'].unique():
             
             if df[mask].shape[0] > 0:
                 # Create figure
-                plt.figure(figsize=(10, 6))
+                plt.figure(figsize=(8, 6))
                 
-                # Group data by mode and io_mode, and calculate mean performance
-                grouped = df[mask].groupby(['mode', 'io_mode'])['observed_write_rate'].mean().reset_index()
+                # Group data by mode and calculate mean performance
+                grouped = df[mask].groupby(['mode'])['observed_write_rate'].mean().reset_index()
                 
-                # Create a new column for group names to use in bar chart
-                grouped['group'] = grouped['mode'] + ' ' + grouped['io_mode']
+                # Colors for the modes
+                colors = {'GDS': 'blue', 'CPU': 'red'}
+                bar_colors = [colors[mode] for mode in grouped['mode']]
                 
                 # Create bar chart
-                bars = plt.bar(grouped['group'], grouped['observed_write_rate'], color=['blue', 'lightblue', 'red', 'salmon'])
+                bars = plt.bar(grouped['mode'], grouped['observed_write_rate'], color=bar_colors)
                 
                 # Add value labels on top of each bar
                 for idx, (bar, height) in enumerate(zip(bars, grouped['observed_write_rate'])):
@@ -591,7 +580,7 @@ for dataset_size in df['dataset_size'].unique():
                                 ha='center', va='bottom', fontsize=10)
                 
                 plt.title(f"Performance Comparison: {threads} threads, {block_size:.0f}KB, {dataset_size}", fontsize=14)
-                plt.xlabel('Configuration', fontsize=12)
+                plt.xlabel('Mode', fontsize=12)
                 plt.ylabel('Observed Write Rate (GB/s)', fontsize=12)
                 plt.grid(axis='y', alpha=0.3)
                 
@@ -628,18 +617,17 @@ for dataset_size in df['dataset_size'].unique():
                    (df['block_size_kb'] == block_size))
             
             if df[mask].shape[0] > 0:
-                # For each configuration, get the four mode/io_mode combinations
+                # For each configuration, get the mode performance
                 for mode in ['GDS', 'CPU']:
-                    for io_mode in ['SYNC', 'ASYNC']:
-                        subset = df[mask & (df['mode'] == mode) & (df['io_mode'] == io_mode)]
-                        if not subset.empty:
-                            plot_data.append(subset['observed_write_rate'].mean())
-                            labels.append(f"{threads}t_{block_size:.0f}KB_{mode}_{io_mode}")
+                    subset = df[mask & (df['mode'] == mode)]
+                    if not subset.empty:
+                        plot_data.append(subset['observed_write_rate'].mean())
+                        labels.append(f"{threads}t_{block_size:.0f}KB_{mode}")
     
     # Calculate positions for grouped bars
-    num_configs = len(plot_data) // 4  # Each config has 4 bars (GDS/CPU × SYNC/ASYNC)
+    num_configs = len(plot_data) // 2  # Each config has 2 bars (GDS/CPU)
     group_positions = np.arange(num_configs)
-    bar_width = 0.2
+    bar_width = 0.35
     
     # Plot the bars with positions
     plt.figure(figsize=(max(15, num_configs * 1.5), 10))
@@ -647,11 +635,11 @@ for dataset_size in df['dataset_size'].unique():
     # Create custom positions for each bar
     positions = []
     for i in range(num_configs):
-        for j in range(4):  # 4 bars per group
-            positions.append(i + (j - 1.5) * bar_width)
+        for j in range(2):  # 2 bars per group (GDS/CPU)
+            positions.append(i + (j - 0.5) * bar_width)
     
     # Create color map
-    colors = ['blue', 'lightblue', 'red', 'salmon'] * num_configs
+    colors = ['blue', 'red'] * num_configs
     
     # Plot bars
     bars = plt.bar(positions, plot_data, width=bar_width, color=colors)
@@ -708,10 +696,8 @@ for dataset_size in df['dataset_size'].unique():
     # Create a custom legend
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor='blue', label='GDS SYNC'),
-        Patch(facecolor='lightblue', label='GDS ASYNC'),
-        Patch(facecolor='red', label='CPU SYNC'),
-        Patch(facecolor='salmon', label='CPU ASYNC')
+        Patch(facecolor='blue', label='GDS'),
+        Patch(facecolor='red', label='CPU')
     ]
     plt.legend(handles=legend_elements, loc='upper right')
     

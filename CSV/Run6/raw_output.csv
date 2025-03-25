@@ -1,6 +1,0 @@
-mode,io_threads,block_size,dataset_size,ranks,compute_time,write_size,raw_write_time,metadata_time,h5fcreate_time,h5fflush_time,h5fclose_time,completion_time,raw_write_rate,observed_write_rate
-GPU,1,1048576,1GB,1,4s,"4.000 GB",2.180,0.000,0.002,0.428,0.000,2.819,"rate: 1.834","rate: 1.419"
-GPU,1,1048576,10GB,1,4s,"0 MB",0,0,0,0,0,0,"0 MB/s","0 MB/s"
-GPU,1,4194304,1GB,1,4s,"4.000 GB",2.994,0.001,0.013,0.709,0.000,3.924,"rate: 1.336","rate: 1.019"
-GPU,1,4194304,10GB,1,4s,"0 MB",0,0,0,0,0,0,"0 MB/s","0 MB/s"
-GPU,4,1048576,1GB,4,4s,"4.000 GB",2.247,0.001,0.005,1.218,0.037,3.561,"rate: 1.779","rate: 1.123"
