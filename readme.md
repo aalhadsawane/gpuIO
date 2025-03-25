@@ -98,3 +98,27 @@ python plot.py --output-dir /home/gpuio/gpuIO/custom_graphs
 > If u make any large file, please make sure to add them to .gitignore to avoid committing them to the repository.
 
 > *Push after every succesful run.*
+
+### 7. Handling Anomalies in Benchmark Results
+
+Sometimes individual benchmark configurations may fail or produce anomalous results (blank entries or 0 values) in the raw_output.csv file. The `anomaly_handler.py` script lets you rerun specific configurations without having to repeat the entire benchmark suite.
+
+```bash
+./anomaly_handler.py "MODE,IO_MODE,IO_THREADS,BLOCK_SIZE,DATASET_SIZE"
+```
+
+For example, if you observe that the GPU,SYNC,1,65536,1GB configuration has missing or zero values:
+
+```bash
+./anomaly_handler.py "GPU,SYNC,1,65536,1GB"
+```
+
+By default, the script runs 5 iterations. You can specify a custom number of iterations:
+
+```bash
+./anomaly_handler.py "GPU,SYNC,1,65536,1GB" --niter 3
+```
+
+The results are saved to `./anomaly_run_output/` directory and can be manually added to the raw_output.csv file or used for individual analysis.
+
+For more detailed usage information, see the comments at the end of the anomaly_handler.py file.

@@ -50,7 +50,8 @@ echo "IO_THREADS: ${IO_THREADS[*]}"
 echo "BLOCK_SIZES: ${BLOCK_SIZES[*]}"
 echo "DATASET_SIZES: ${DATASET_SIZES[*]}"
 echo "MODES: ${MODES[*]}"
-echo "IO_MODES: ${IO_MODES[*]}"
+# Using only SYNC mode, removing IO_MODES entirely
+# echo "IO_MODES: ${IO_MODES[*]}"
 
 # Validate required variables
 if [ -z "$CSV_DIR" ]; then
@@ -61,6 +62,9 @@ fi
 # Ensure HDF5 libraries are in LD_LIBRARY_PATH during benchmarks
 export HDF5_HOME="$HDF5_HOME"
 export LD_LIBRARY_PATH=$HDF5_HOME/lib:$LD_LIBRARY_PATH
+
+# Set MPI thread safety for I/O threads
+export MPICH_MAX_THREAD_SAFETY="multiple"
 
 # Move to the build directory
 cd "$BUILD_DIR"
@@ -87,8 +91,8 @@ echo "Created nodename.txt with hostname in ${new_run_dir}"
 
 # --- Output CSV File ---
 output_csv="${new_run_dir}/raw_output.csv"
-# Create the CSV file with header
-echo "mode,io_mode,io_threads,block_size,dataset_size,ranks,compute_time,write_size,raw_write_time,metadata_time,h5fcreate_time,h5fflush_time,h5fclose_time,completion_time,raw_write_rate,observed_write_rate" > "${output_csv}"
+# Create the CSV file with header - removing io_mode from the header
+echo "mode,io_threads,block_size,dataset_size,ranks,compute_time,write_size,raw_write_time,metadata_time,h5fcreate_time,h5fflush_time,h5fclose_time,completion_time,raw_write_rate,observed_write_rate" > "${output_csv}"
 
 # Ensure the file exists and is writable
 if [ ! -f "${output_csv}" ]; then
@@ -107,191 +111,175 @@ for mode in "${MODES[@]}"; do
         export LEGATE_IO_USE_VFD_GDS=0
     fi
 
-    for io_mode in "${IO_MODES[@]}"; do
-        echo "Testing with I/O mode: $io_mode"
-        
-        for io_threads in "${IO_THREADS[@]}"; do
-            for block_size in "${BLOCK_SIZES[@]}"; do
-                for dataset_size in "${DATASET_SIZES[@]}"; do
+    # Remove the IO_MODES loop completely and always run in SYNC mode
+    echo "Testing with I/O mode: SYNC (fixed)"
+    
+    for io_threads in "${IO_THREADS[@]}"; do
+        for block_size in "${BLOCK_SIZES[@]}"; do
+            for dataset_size in "${DATASET_SIZES[@]}"; do
+                # Extract numeric part of dataset size (remove "GB")
+                dataset_size_num=${dataset_size%GB}
+                
+                # Convert to bytes (1GB = 1,073,741,824 bytes)
+                dataset_bytes=$(echo "$dataset_size_num * 1073741824" | bc)
+                
+                # Calculate bytes per thread
+                bytes_per_thread=$(echo "$dataset_bytes / $io_threads" | bc)
+                
+                # Calculate number of particles (elements)
+                # Assuming sizeof(double) = 8 bytes
+                num_particles=$(echo "$bytes_per_thread / 8" | bc)
+                
+                # Set dimensions ensuring NUM_PARTICLES = DIM_1 * DIM_2 * DIM_3
+                # Using 1D array with remaining dimensions as 1
+                DIM_1=$num_particles
+                DIM_2=1
+                DIM_3=1
+                
+                # Calculate expected data size per process and total
+                # Each process will write num_particles * 8 bytes * 1 timestep
+                per_process_bytes=$(echo "$num_particles * 8" | bc)
+                per_process_mb=$(echo "scale=2; $per_process_bytes / 1048576" | bc)
+                total_mb=$(echo "scale=2; $per_process_mb * $io_threads" | bc)
+                
+                # Debug: Print the calculated values before creating config
+                echo "Calculated dimensions for dataset_size=${dataset_size}, io_threads=${io_threads}:"
+                echo "  num_particles = $num_particles"
+                echo "  DIM_1 = $DIM_1"
+                echo "  DIM_2 = $DIM_2"
+                echo "  DIM_3 = $DIM_3"
+                echo "  block_size = $block_size"
+                echo "  Expected data size per process: ~${per_process_bytes} bytes (~${per_process_mb} MB)"
+                echo "  Expected total data size: ~${total_mb} MB (${io_threads} processes × 1 timestep)"
 
-                    # Create a JSON config file for h5bench
-                    config_file="/home/gpuio/gpuIO/Results/config_${mode}_${io_mode}_${io_threads}_${block_size}_${dataset_size}.json"
-                    output_file="/home/gpuio/gpuIO/Results/output_${mode}_${io_mode}_${io_threads}_${block_size}_${dataset_size}.h5"
-                    log_file="/home/gpuio/gpuIO/Results/log_${mode}_${io_mode}_${io_threads}_${block_size}_${dataset_size}.txt"
-                    run_dir="/home/gpuio/gpuIO/Results/runs_${mode}_${io_mode}_${io_threads}_${block_size}_${dataset_size}"
-                    
-                    # Create the run directory and ensure it exists
-                    mkdir -p "$run_dir"
-                    
-                    # Remove any existing output files to prevent issues
-                    rm -f "$output_file"
-                    
-                    # Create the JSON configuration file
-                    cat > "$config_file" << EOF
-{
-    "mpi": {
-        "command": "mpirun",
-        "ranks": "1",
-        "configuration": "-n 1"
-    },
-    "vol": {
-    },
-    "file-system": {
-    },
-    "directory": "${run_dir}",
-    "benchmarks": [
-        {
-            "benchmark": "write",
-            "file": "${output_file}",
-            "configuration": {
-                "MEM_PATTERN": "CONTIG",
-                "FILE_PATTERN": "CONTIG",
-                "TIMESTEPS": "10",
-                "DELAYED_CLOSE_TIMESTEPS": "2",
-                "COLLECTIVE_DATA": "YES",
-                "COLLECTIVE_METADATA": "YES",
-                "EMULATED_COMPUTE_TIME_PER_TIMESTEP": "2 s", 
-                "NUM_DIMS": "3",
-                "DIM_1": "1028",
-                "DIM_2": "1028",
-                "DIM_3": "512",
-                "MODE": "${io_mode}"
-            }
-        }
-    ]
-}
+                # For the simple approach with mpirun + h5bench_write
+                output_file="/home/gpuio/gpuIO/Results/output_${mode}_${io_threads}_${block_size}_${dataset_size}.h5"
+                log_file="/home/gpuio/gpuIO/Results/log_${mode}_${io_threads}_${block_size}_${dataset_size}.txt"
+                run_dir="/home/gpuio/gpuIO/Results/runs_${mode}_${io_threads}_${block_size}_${dataset_size}"
+                
+                # Create the run directory and ensure it exists
+                mkdir -p "$run_dir"
+                
+                # Remove any existing output files to prevent issues
+                rm -f "$output_file"
+                
+                # Create a text configuration file for h5bench_write - this is our primary approach now
+                text_config="${run_dir}/h5bench.cfg"
+                cat > "$text_config" << EOF
+IO_OPERATION=WRITE
+MEM_PATTERN=CONTIG
+FILE_PATTERN=CONTIG
+NUM_PARTICLES=${num_particles}
+TIMESTEPS=1
+NUM_DIMS=3
+DIM_1=${DIM_1}
+DIM_2=${DIM_2}
+DIM_3=${DIM_3}
+BLOCK_SIZE=${block_size}
+COLLECTIVE_DATA=YES
+COLLECTIVE_METADATA=YES
+TIMESTEP_COMPUTE_TIME=4
 EOF
 
-                    # Ensure file has proper permissions
-                    chmod 644 "$config_file"
-
-                    echo "Running benchmark: Mode=$mode, I/O Mode=$io_mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
+                # Ensure file has proper permissions
+                chmod 644 "$text_config"
+                
+                # Check if h5bench_write exists and run the benchmark
+                if [ ! -f "./h5bench_write" ]; then
+                    echo "ERROR: h5bench_write executable not found in current directory!"
+                    continue
+                fi
+                
+                # Output for debug info
+                echo "Configuration file:"
+                cat "$text_config"
+                echo ""
+                
+                # Run the benchmark using mpirun + h5bench_write
+                echo "Running benchmark: Mode=$mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
+                echo "RUNNING: mpirun -n ${io_threads} ./h5bench_write ${text_config} ${output_file}"
+                mpirun -n ${io_threads} ./h5bench_write "${text_config}" "${output_file}" > "${log_file}" 2>&1
+                benchmark_status=$?
+                
+                # Check if the benchmark succeeded
+                if [ $benchmark_status -ne 0 ]; then
+                    echo "WARNING: Benchmark exited with non-zero status: $benchmark_status"
+                    echo "Error details (first 20 lines):"
+                    head -20 "$log_file"
+                    echo "..."
+                    echo "Last 10 lines of log:"
+                    tail -10 "$log_file"
+                else
+                    echo "Benchmark completed successfully with exit code 0"
+                fi
+                
+                # Create a directory for storing outputs
+                results_dir="${run_dir}/output"
+                mkdir -p "$results_dir"
+                cp "$log_file" "${results_dir}/stdout"
+                
+                # Initialize metrics
+                ranks="$io_threads"
+                raw_write_rate="0 MB/s"
+                observed_write_rate="0 MB/s"
+                compute_time="0"
+                write_size="0 MB"
+                raw_write_time="0"
+                metadata_time="0"
+                h5fcreate_time="0"
+                h5fflush_time="0"
+                h5fclose_time="0"
+                completion_time="0"
+                
+                # Extract metrics from log file
+                if [ -f "$log_file" ]; then
+                    echo "Extracting metrics from log file"
                     
-                    # Run the benchmark using the main h5bench command with the JSON config
-                    ./h5bench "$config_file" | tee "$log_file"
-
-                    # Extract metrics from the log file and run directory
-                    run_subdir=$(find "$run_dir" -mindepth 1 -maxdepth 1 -type d | sort -r | head -1)
-                    
-                    if [ -n "$run_subdir" ]; then
-                        stdout_file="$run_subdir/stdout"
+                    # Extract metrics if available
+                    if grep -q "write rate" "$log_file"; then
+                        echo "Performance metrics found in log file"
                         
-                        if [ -f "$stdout_file" ]; then
-                            echo "Extracting metrics from stdout file: $stdout_file"
-                            
-                            # Extract ALL performance metrics from the stdout file in the same order as displayed
-                            ranks=$(grep "Total number of ranks:" "$stdout_file" | awk '{print $5}')
-                            compute_time=$(grep "Total emulated compute time:" "$stdout_file" | awk '{print $5}')
-                            
-                            # Extract write size with units
-                            write_size_line=$(grep "Total write size:" "$stdout_file")
-                            write_size=$(echo "$write_size_line" | awk '{print $4" "$5}')
-                            
-                            raw_write_time=$(grep "Raw write time:" "$stdout_file" | awk '{print $4}')
-                            metadata_time=$(grep "Metadata time:" "$stdout_file" | awk '{print $3}')
-                            h5fcreate_time=$(grep "H5Fcreate() time:" "$stdout_file" | awk '{print $3}')
-                            h5fflush_time=$(grep "H5Fflush() time:" "$stdout_file" | awk '{print $3}')
-                            h5fclose_time=$(grep "H5Fclose() time:" "$stdout_file" | awk '{print $3}')
-                            completion_time=$(grep "Observed completion time:" "$stdout_file" | awk '{print $4}')
-                            
-                            # Extract write rates with units
-                            raw_write_rate_line=$(grep "SYNC Raw write rate:" "$stdout_file")
-                            raw_write_rate=$(echo "$raw_write_rate_line" | awk '{print $5" "$6}')
-                            
-                            observed_write_rate_line=$(grep "SYNC Observed write rate:" "$stdout_file")
-                            observed_write_rate=$(echo "$observed_write_rate_line" | awk '{print $5" "$6}')
-                            
-                            # Log what we found
-                            echo "Successfully extracted metrics from $stdout_file"
-                            
-                            # Print current progress for tracking long-running benchmarks
-                            mode_count=${#MODES[@]}
-                            io_mode_count=${#IO_MODES[@]}
-                            io_threads_count=${#IO_THREADS[@]}
-                            block_size_count=${#BLOCK_SIZES[@]}
-                            dataset_size_count=${#DATASET_SIZES[@]}
-                            
-                            total_runs=$((mode_count * io_mode_count * io_threads_count * block_size_count * dataset_size_count))
-                            current_mode_idx=$(printf '%s\n' "${MODES[@]}" | grep -n "^$mode$" | cut -d: -f1)
-                            current_io_mode_idx=$(printf '%s\n' "${IO_MODES[@]}" | grep -n "^$io_mode$" | cut -d: -f1)
-                            current_io_threads_idx=$(printf '%s\n' "${IO_THREADS[@]}" | grep -n "^$io_threads$" | cut -d: -f1)
-                            current_block_size_idx=$(printf '%s\n' "${BLOCK_SIZES[@]}" | grep -n "^$block_size$" | cut -d: -f1)
-                            current_dataset_size_idx=$(printf '%s\n' "${DATASET_SIZES[@]}" | grep -n "^$dataset_size$" | cut -d: -f1)
-                            
-                            completed_runs=$(( 
-                                (current_mode_idx - 1) * io_mode_count * io_threads_count * block_size_count * dataset_size_count +
-                                (current_io_mode_idx - 1) * io_threads_count * block_size_count * dataset_size_count +
-                                (current_io_threads_idx - 1) * block_size_count * dataset_size_count +
-                                (current_block_size_idx - 1) * dataset_size_count +
-                                current_dataset_size_idx
-                            ))
-                            
-                            progress_pct=$(( completed_runs * 100 / total_runs ))
-                            echo "Benchmark progress: $completed_runs/$total_runs ($progress_pct%)"
-                            
-                        else
-                            echo "WARNING: stdout file not found in run directory $run_subdir"
-                            # Print the directory contents for debugging
-                            echo "Contents of $run_subdir:"
-                            ls -la "$run_subdir"
-                            
-                            # Check stderr for errors
-                            stderr_file="$run_subdir/stderr"
-                            if [ -f "$stderr_file" ]; then
-                                echo "Checking stderr for errors:"
-                                grep -i error "$stderr_file" | head -10
-                            fi
-                        fi
+                        # Try to extract key metrics
+                        compute_time=$(grep -i "Total emulated compute time:" "$log_file" | awk '{print $5}' || echo "0")
+                        write_size=$(grep -i "Total write size:" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB")
+                        raw_write_time=$(grep -i "Raw write time:" "$log_file" | awk '{print $4}' || echo "0")
+                        metadata_time=$(grep -i "Metadata time:" "$log_file" | awk '{print $3}' || echo "0")
+                        h5fcreate_time=$(grep -i "H5Fcreate() time:" "$log_file" | awk '{print $3}' || echo "0")
+                        h5fflush_time=$(grep -i "H5Fflush() time:" "$log_file" | awk '{print $3}' || echo "0")
+                        h5fclose_time=$(grep -i "H5Fclose() time:" "$log_file" | awk '{print $3}' || echo "0")
+                        completion_time=$(grep -i "Observed completion time:" "$log_file" | awk '{print $4}' || echo "0")
+                        raw_write_rate=$(grep -i "Raw write rate" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB/s")
+                        observed_write_rate=$(grep -i "Observed write rate" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB/s")
+                        ranks=$(grep -i "Total number of ranks" "$log_file" | awk '{print $5}' || echo "$io_threads")
+                        
+                        echo "Extracted metrics:"
+                        echo "  Compute time: $compute_time"
+                        echo "  Write size: $write_size"
+                        echo "  Raw write time: $raw_write_time"
+                        echo "  Metadata time: $metadata_time"
+                        echo "  H5Fcreate time: $h5fcreate_time"
+                        echo "  H5Fflush time: $h5fflush_time"
+                        echo "  H5Fclose time: $h5fclose_time"
+                        echo "  Completion time: $completion_time"
+                        echo "  Raw write rate: $raw_write_rate"
+                        echo "  Observed write rate: $observed_write_rate"
+                        echo "  Ranks: $ranks"
                     else
-                        echo "WARNING: No run subdirectory found in $run_dir"
-                        # Print contents of the run directory
-                        echo "Contents of $run_dir:"
-                        ls -la "$run_dir"
+                        echo "No performance metrics found in log file"
                     fi
-                    
-                    # If we couldn't extract metrics, the run might have failed
-                    if [ -z "$completion_time" ] || [ -z "$raw_write_rate" ]; then
-                        echo "WARNING: Could not extract metrics, benchmark might have failed"
-                        
-                        # Check if there's any output at all
-                        if [ -f "$log_file" ]; then
-                            echo "Contents of log file ($log_file):"
-                            head -50 "$log_file" | grep -v "^$"
-                        fi
-                    fi
+                else
+                    echo "Log file not found: $log_file"
+                fi
+                
+                # Append the results to the CSV file
+                echo "$mode,$io_threads,$block_size,$dataset_size,$ranks,$compute_time,\"$write_size\",$raw_write_time,$metadata_time,$h5fcreate_time,$h5fflush_time,$h5fclose_time,$completion_time,\"$raw_write_rate\",\"$observed_write_rate\"" >> "$output_csv"
 
-                    # Fallback to zero if any metric is missing
-                    write_time=${completion_time:-0}
-                    metadata_time=${metadata_time:-0}
-                    raw_write_time=${raw_write_time:-0}
-                    flush_time=${h5fflush_time:-0}
-                    close_time=${h5fclose_time:-0}
-                    sync_raw_write_rate=${raw_write_rate:-0}
-                    sync_observed_write_rate=${observed_write_rate:-0}
-                    ranks=${ranks:-0}
-                    compute_time=${compute_time:-0}
-                    write_size=${write_size:-"0 MB"}
-                    h5fcreate_time=${h5fcreate_time:-0}
+                # Print a summary
+                echo "Results saved to CSV for Mode=$mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
+                echo "Raw Write Rate: $raw_write_rate"
+                echo "Observed Write Rate: $observed_write_rate"
+                echo ""
 
-                    # Append the results to the CSV file with extended format
-                    echo "$mode,$io_mode,$io_threads,$block_size,$dataset_size,$ranks,$compute_time,\"$write_size\",$raw_write_time,$metadata_time,$h5fcreate_time,$h5fflush_time,$h5fclose_time,$completion_time,\"$raw_write_rate\",\"$observed_write_rate\"" >> "$output_csv"
-
-                    # Print a summary of the results
-                    echo "Results for Mode=$mode, I/O Mode=$io_mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size:"
-                    echo "  Ranks: $ranks"
-                    echo "  Compute Time: $compute_time s"
-                    echo "  Write Size: $write_size"
-                    echo "  Raw Write Time: $raw_write_time s"
-                    echo "  Metadata Time: $metadata_time s"
-                    echo "  H5Fcreate() Time: $h5fcreate_time s"
-                    echo "  H5Fflush() Time: $h5fflush_time s"
-                    echo "  H5Fclose() Time: $h5fclose_time s"
-                    echo "  Observed Completion Time: $completion_time s"
-                    echo "  Raw Write Rate: $raw_write_rate"
-                    echo "  Observed Write Rate: $observed_write_rate"
-                    echo ""
-
-                done
             done
         done
     done
@@ -304,73 +292,30 @@ echo ""
 echo "===== BENCHMARK SUMMARY ====="
 echo ""
 
-# For GPU mode with SYNC
-echo "Top 3 GPU SYNC Raw Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" && $2=="SYNC" {gsub(/"/, "", $15); split($15, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+# For GPU mode
+echo "Top 3 GPU Raw Write Rates:"
+awk -F, 'NR>1 && $1=="GPU" {gsub(/"/, "", $14); split($14, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 echo ""
-echo "Top 3 GPU SYNC Observed Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" && $2=="SYNC" {gsub(/"/, "", $16); split($16, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+echo "Top 3 GPU Observed Write Rates:"
+awk -F, 'NR>1 && $1=="GPU" {gsub(/"/, "", $15); split($15, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
 
-# For GPU mode with ASYNC
+# For CPU mode
 echo ""
-echo "Top 3 GPU ASYNC Raw Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" && $2=="ASYNC" {gsub(/"/, "", $15); split($15, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
-
-echo ""
-echo "Top 3 GPU ASYNC Observed Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" && $2=="ASYNC" {gsub(/"/, "", $16); split($16, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
-
-# For CPU mode with SYNC
-echo ""
-echo "Top 3 CPU SYNC Raw Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" && $2=="SYNC" {gsub(/"/, "", $15); split($15, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
+echo "Top 3 CPU Raw Write Rates:"
+awk -F, 'NR>1 && $1=="CPU" {gsub(/"/, "", $14); split($14, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 echo ""
-echo "Top 3 CPU SYNC Observed Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" && $2=="SYNC" {gsub(/"/, "", $16); split($16, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
-
-# For CPU mode with ASYNC
-echo ""
-echo "Top 3 CPU ASYNC Raw Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" && $2=="ASYNC" {gsub(/"/, "", $15); split($15, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
-
-echo ""
-echo "Top 3 CPU ASYNC Observed Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" && $2=="ASYNC" {gsub(/"/, "", $16); split($16, rate, " "); print $3 " threads, " $4 " block size, " $5 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
-
-# Compare SYNC vs ASYNC by thread count
-echo ""
-echo "SYNC vs ASYNC Comparison by Thread Count (Average Observed Write Rate):"
-for threads in "${IO_THREADS[@]}"; do
-    sync_avg=$(awk -F, -v t="$threads" 'NR>1 && $2=="SYNC" && $3==t {gsub(/"/, "", $16); split($16, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0)}' "$output_csv")
-    async_avg=$(awk -F, -v t="$threads" 'NR>1 && $2=="ASYNC" && $3==t {gsub(/"/, "", $16); split($16, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0)}' "$output_csv")
-    
-    # Calculate improvement percentage if both values are non-zero
-    if (( $(echo "$sync_avg > 0" | bc -l) )) && (( $(echo "$async_avg > 0" | bc -l) )); then
-        improvement=$(echo "($async_avg - $sync_avg) / $sync_avg * 100" | bc -l)
-        printf "%s threads: SYNC=%.2f GB/s, ASYNC=%.2f GB/s (%.2f%% improvement)\n" "$threads" "$sync_avg" "$async_avg" "$improvement"
-    else
-        printf "%s threads: SYNC=%.2f GB/s, ASYNC=%.2f GB/s\n" "$threads" "$sync_avg" "$async_avg"
-    fi
-done
+echo "Top 3 CPU Observed Write Rates:"
+awk -F, 'NR>1 && $1=="CPU" {gsub(/"/, "", $15); split($15, rate, " "); print $2 " threads, " $3 " block size, " $4 " dataset: " rate[1] " " rate[2]}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 # Summary by thread count (average across all configurations)
 echo ""
-echo "Average Performance by Thread Count for SYNC Mode:"
+echo "Average Performance by Thread Count:"
 echo "Threads,Avg_Raw_Write_Rate,Avg_Observed_Write_Rate"
 for threads in "${IO_THREADS[@]}"; do
-    avg_raw=$(awk -F, -v t="$threads" 'NR>1 && $2=="SYNC" && $3==t {gsub(/"/, "", $15); split($15, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    avg_obs=$(awk -F, -v t="$threads" 'NR>1 && $2=="SYNC" && $3==t {gsub(/"/, "", $16); split($16, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    echo "$threads,$avg_raw,$avg_obs"
-done
-
-echo ""
-echo "Average Performance by Thread Count for ASYNC Mode:"
-echo "Threads,Avg_Raw_Write_Rate,Avg_Observed_Write_Rate"
-for threads in "${IO_THREADS[@]}"; do
-    avg_raw=$(awk -F, -v t="$threads" 'NR>1 && $2=="ASYNC" && $3==t {gsub(/"/, "", $15); split($15, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
-    avg_obs=$(awk -F, -v t="$threads" 'NR>1 && $2=="ASYNC" && $3==t {gsub(/"/, "", $16); split($16, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
+    avg_raw=$(awk -F, -v t="$threads" 'NR>1 && $2==t {gsub(/"/, "", $14); split($14, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
+    avg_obs=$(awk -F, -v t="$threads" 'NR>1 && $2==t {gsub(/"/, "", $15); split($15, rate, " "); sum+=rate[1]; count++} END {print (count>0 ? sum/count : 0) " GB/s"}' "$output_csv")
     echo "$threads,$avg_raw,$avg_obs"
 done
 
