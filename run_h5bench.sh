@@ -80,11 +80,17 @@ mkdir -p "${DUMP_DIR}"
 # Create incremental directory in CSV folder
 mkdir -p "${CSV_DIR}"
 
-# Find the next available RunN directory
+# Find the next available RunN directory by finding the maximum existing run number
 run_num=1
-while [ -d "${CSV_DIR}/Run${run_num}" ]; do
-    run_num=$((run_num + 1))
+for dir in "${CSV_DIR}"/Run*; do
+    if [ -d "$dir" ]; then
+        current_num=$(basename "$dir" | sed 's/Run//')
+        if [ "$current_num" -gt "$run_num" ]; then
+            run_num=$current_num
+        fi
+    fi
 done
+run_num=$((run_num + 1))
 
 # Create the new RunN directory and set it as output directory
 new_run_dir="$CSV_DIR/Run$run_num"
