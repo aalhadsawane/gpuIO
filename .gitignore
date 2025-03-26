@@ -3,7 +3,6 @@ build/
 **/build/
 **/build/*
 benchmarks/ 
-Results/
 login.py
 # Compiled files
 *.o
@@ -44,3 +43,12 @@ deps/
 vendor/ __pycache__/
 *.py[cod]
 *.class
+
+# Ignore output directories
+dump/
+Results/
+
+# Ignore virtual environment
+venv/
+env/
+.venv/

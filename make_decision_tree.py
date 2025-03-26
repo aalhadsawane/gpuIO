@@ -173,7 +173,7 @@ def clean_write_rate(rate_str):
 def load_data(csv_path):
     """Load and preprocess benchmark data"""
     print(f"Loading data from {csv_path}")
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, comment='#')  # Explicitly handle lines starting with # as comments
     
     # Convert dataset_size to numeric (GB)
     df['dataset_size_gb'] = df['dataset_size'].str.replace('GB', '').astype(float)
@@ -192,7 +192,7 @@ def load_data(csv_path):
     
     # Compare GPU vs CPU for each configuration
     comparisons = []
-    for (io_mode, io_threads, block_size, dataset_size), group in df.groupby(['io_mode', 'io_threads', 'block_size', 'dataset_size']):
+    for (io_threads, block_size, dataset_size), group in df.groupby(['io_threads', 'block_size', 'dataset_size']):
         gpu_group = group[group['mode'] == gpu_mode]
         cpu_group = group[group['mode'] == cpu_mode]
         
@@ -213,7 +213,6 @@ def load_data(csv_path):
             perf_diff = 1.0 if gpu_rate > 0 else 0.0
             
         comparisons.append({
-            'io_mode': 1 if io_mode == 'ASYNC' else 0,
             'io_threads': io_threads,
             'block_size': block_size,
             'dataset_size_gb': float(dataset_size.replace('GB', '')),
@@ -229,7 +228,7 @@ def load_data(csv_path):
     print(f"GPU better: {len(comparison_df[comparison_df['target'] == 1])} cases")
     print(f"CPU better: {len(comparison_df[comparison_df['target'] == 0])} cases")
     
-    X = comparison_df[['io_threads', 'block_size', 'dataset_size_gb', 'io_mode']].values
+    X = comparison_df[['io_threads', 'block_size', 'dataset_size_gb']].values
     y = comparison_df['target'].values
     
     return X, y, comparison_df
@@ -317,7 +316,7 @@ def generate_decision_tree(df_or_path, output_dir=None):
         comparisons = []
         
         # Group by configuration
-        for (io_mode, io_threads, block_size, dataset_size), group in df.groupby(['io_mode', 'io_threads', 'block_size', 'dataset_size']):
+        for (io_threads, block_size, dataset_size), group in df.groupby(['io_threads', 'block_size', 'dataset_size']):
             gpu_group = group[group['mode'] == gpu_mode]
             cpu_group = group[group['mode'] == cpu_mode]
             
@@ -341,7 +340,6 @@ def generate_decision_tree(df_or_path, output_dir=None):
             dataset_size_gb = float(dataset_size.replace('GB', ''))
                 
             comparisons.append({
-                'io_mode': 1 if io_mode == 'ASYNC' else 0,
                 'io_threads': io_threads,
                 'block_size': block_size,
                 'dataset_size_gb': dataset_size_gb,
@@ -354,7 +352,7 @@ def generate_decision_tree(df_or_path, output_dir=None):
         # Convert to DataFrame
         comparison_df = pd.DataFrame(comparisons)
         
-        X = comparison_df[['io_threads', 'block_size', 'dataset_size_gb', 'io_mode']].values
+        X = comparison_df[['io_threads', 'block_size', 'dataset_size_gb']].values
         y = comparison_df['target'].values
     
     # Create output directory if it doesn't exist
@@ -366,7 +364,7 @@ def generate_decision_tree(df_or_path, output_dir=None):
     print(f"CPU better: {len(comparison_df[comparison_df['target'] == 0])} cases")
     
     # Define feature and class names
-    feature_names = ['I/O Threads', 'Block Size (bytes)', 'Dataset Size (GB)', 'I/O Mode']
+    feature_names = ['I/O Threads', 'Block Size (bytes)', 'Dataset Size (GB)']
     class_names = ['CPU Better', 'GPU Better']
     
     # Build decision tree

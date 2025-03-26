@@ -44,7 +44,7 @@ done < "$config_file"
 echo "Loaded configuration:"
 echo "HDF5_HOME: $HDF5_HOME"
 echo "BUILD_DIR: $BUILD_DIR"
-echo "RESULTS_DIR: $RESULTS_DIR"
+echo "DUMP_DIR: $DUMP_DIR"
 echo "CSV_DIR: $CSV_DIR"
 echo "IO_THREADS: ${IO_THREADS[*]}"
 echo "BLOCK_SIZES: ${BLOCK_SIZES[*]}"
@@ -70,12 +70,12 @@ export MPICH_MAX_THREAD_SAFETY="multiple"
 # Move to the build directory
 cd "$BUILD_DIR"
 
-# Clear existing Results directory
-echo "Clearing previous results from ${RESULTS_DIR}"
-rm -rf "${RESULTS_DIR}"/*
+# Clear existing dump directory
+echo "Clearing previous results from ${DUMP_DIR}"
+rm -rf "${DUMP_DIR}"/*
 
-# Create Results directory with capital R (as specified)
-mkdir -p "${RESULTS_DIR}"
+# Create dump directory
+mkdir -p "${DUMP_DIR}"
 
 # Create incremental directory in CSV folder
 mkdir -p "${CSV_DIR}"
@@ -165,9 +165,9 @@ for mode in "${MODES[@]}"; do
                 echo "  Expected total data size: ~${total_mb} MB (${io_threads} processes × ${timesteps} timesteps)"
 
                 # For the simple approach with mpirun + h5bench_write
-                output_file="/home/gpuio/gpuIO/Results/output_${mode}_${io_threads}_${block_size}_${dataset_size}.h5"
-                log_file="/home/gpuio/gpuIO/Results/log_${mode}_${io_threads}_${block_size}_${dataset_size}.txt"
-                run_dir="/home/gpuio/gpuIO/Results/runs_${mode}_${io_threads}_${block_size}_${dataset_size}"
+                output_file="${DUMP_DIR}/output_${mode}_${io_threads}_${block_size}_${dataset_size}.h5"
+                log_file="${DUMP_DIR}/log_${mode}_${io_threads}_${block_size}_${dataset_size}.txt"
+                run_dir="${DUMP_DIR}/runs_${mode}_${io_threads}_${block_size}_${dataset_size}"
                 
                 # Create the run directory and ensure it exists
                 mkdir -p "$run_dir"
@@ -233,8 +233,8 @@ EOF
                 echo "Benchmark log will be saved to: ${log_file}"
                 echo "Configuration file: ${text_config}"
                 echo "Emulated compute time setting: ${COMPUTE_TIME:-4s} seconds"
-                echo "RUNNING: mpirun -n ${io_threads} ./h5bench_write ${text_config} ${output_file}"
-                mpirun -n ${io_threads} ./h5bench_write "${text_config}" "${output_file}" > "${log_file}" 2>&1
+                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write ${text_config} ${output_file}"
+                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write "${text_config}" "${output_file}" > "${log_file}" 2>&1
                 benchmark_status=$?
                 
                 # Check if the benchmark succeeded
@@ -247,6 +247,18 @@ EOF
                     tail -10 "$log_file"
                 else
                     echo "Benchmark completed successfully with exit code 0"
+                    # Clean up the output H5 file after successful completion
+                    if [ -f "$output_file" ]; then
+                        # Check if the file is still being written to
+                        if lsof "$output_file" > /dev/null 2>&1; then
+                            echo "Warning: File is still in use, waiting for it to be fully closed..."
+                            sleep 2
+                        fi
+                        echo "Cleaning up output file: $output_file"
+                        rm -f "$output_file"
+                    else
+                        echo "Warning: Output file not found for cleanup: $output_file"
+                    fi
                 fi
                 
                 # Create a directory for storing outputs

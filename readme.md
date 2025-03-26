@@ -15,6 +15,8 @@ git clone https://github.com/aalhadsawane/gpuIO.git
 cd gpuIO
 ```
 
+this folder (`gpuIO`) is recommended workspace folder
+
 ### 1. install hdf5 LTS in gpuIO user.
 
 ```bash
@@ -36,6 +38,8 @@ The steps ahead will be reused every experiment.
 >Edit `benchmark_config.conf` in source dir of repo.
 
 >Set number of IO threads, dataset sizes, block sizes and IO modes there.
+
+*NOTE*: These IO threads, are the hardware threads not virtual and for colvas they max out to 20. Do not set number of io threads more than 20.
 
 ### 4. Run and get h5bench data in csv
 

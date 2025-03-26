@@ -82,7 +82,7 @@ plt.style.use('ggplot')
 sns.set_context("notebook", font_scale=1.2)
 
 # Read the data
-df = pd.read_csv(data_path)
+df = pd.read_csv(data_path, comment='#')  # Explicitly handle lines starting with # as comments
 
 # Convert write rates to numeric values (remove units)
 df['raw_write_rate'] = df['raw_write_rate'].str.extract('(\d+\.?\d*)').astype(float)
@@ -100,8 +100,13 @@ p5 = np.percentile(df['observed_write_rate'], 5)
 p95 = np.percentile(df['observed_write_rate'], 95)
 print(f"Using percentile-based scaling: P5={p5:.2f}, P95={p95:.2f}")
 
-# Standard y-axis limit for all performance plots
-y_max = 250  # Maximum GB/s to show on y-axis
+# Calculate dynamic y-axis limit based on data
+y_max = min(p95 * 1.1, max(df['observed_write_rate']) * 1.1)  # Use 110% of P95 or max value, whichever is smaller
+y_min = max(0, p5 * 0.9)  # Use 90% of P5 or 0, whichever is larger
+
+# Get unique values for axes
+block_sizes = sorted(df['block_size_kb'].unique())
+thread_counts = sorted(df['io_threads'].unique())
 
 # ======== PLOT 1: Performance Heatmap with Raw Data Points ========
 # Create separate plots for each dataset size
@@ -119,7 +124,7 @@ for dataset_size in df['dataset_size'].unique():
     }
     
     # Define the color mapping for regular values (using percentiles)
-    main_norm = mcolors.Normalize(vmin=p5, vmax=p95)  # Use P5 and P95 for the range
+    main_norm = mcolors.Normalize(vmin=y_min, vmax=y_max)  # Use dynamic range
     main_cmap = plt.cm.viridis
     
     # Create a custom colormap for outliers (values outside the P5-P95 range)
@@ -151,10 +156,10 @@ for dataset_size in df['dataset_size'].unique():
         mask_below_range = values_array < p5
         mask_above_range = values_array > p95
         
-        # Plot the main heatmap with the percentile-based range
+        # Plot the main heatmap with the dynamic range
         heatmap = sns.heatmap(pivot_data, annot=True, fmt='.1f', cmap=main_cmap, 
                   ax=ax, cbar=True, annot_kws={"size": 10}, 
-                  vmin=p5, vmax=p95, 
+                  vmin=y_min, vmax=y_max, 
                   cbar_kws={'label': 'Write Speed (GB/s)'})
         
         # Now overlay the outliers with different colors
@@ -184,16 +189,15 @@ for dataset_size in df['dataset_size'].unique():
                 transform=ax.transAxes, ha='center', fontsize=10, 
                 bbox=dict(facecolor='white', alpha=0.7))
         
-        # Overlay scatter plot with raw data points
-        for _, row_data in subset.iterrows():
-            ax.scatter(
-                row_data['block_size_kb'], 
-                row_data['io_threads'],
-                s=50,  # Smaller size of markers
-                edgecolor='black',
-                facecolor='none',
-                linewidth=1.5
-            )
+        # Set axis limits based on data
+        ax.set_xlim(0, len(block_sizes))
+        ax.set_ylim(0, len(thread_counts))
+        
+        # Set axis labels
+        ax.set_xticks(np.arange(len(block_sizes)) + 0.5)
+        ax.set_yticks(np.arange(len(thread_counts)) + 0.5)
+        ax.set_xticklabels([f'{x:.0f}' for x in block_sizes])
+        ax.set_yticklabels([f'{x}' for x in thread_counts])
         
         ax.set_title(f'{mode}', fontsize=16)
         ax.set_xlabel('Block Size (KB)', fontsize=14)
