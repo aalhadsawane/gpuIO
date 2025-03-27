@@ -57,7 +57,9 @@ A txt file called `nodename.txt` inside the Run folder is also made which stores
 
 u can check the `h5bench_output.log` file to check where the experiment has reached. (Look for `Benchmark progress`).
 
-To kill the experiment midway: ```ps aux | grep run_h5bench.sh``` and kill the PID.
+To kill the experiment midway: ```ps aux | grep run_h5bench.sh``` and kill -9 the PID. You can also send a SIGINT (ctrl+c) signal with `kill -2` to skip a single benchmark that might be stuck.
+
+
 ### 5. Plot the csv
 
 Create a venv with

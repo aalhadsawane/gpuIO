@@ -61,21 +61,26 @@ def build_tree(X, y, depth=0, max_depth=5):
     # Find best split
     feature, threshold, gain = find_best_split(X, y)
     
-    # Lower the information gain threshold to allow more splits
-    if gain < 0.001:  # Much smaller minimum gain threshold
+    # Set a small information gain threshold to allow more splits
+    if gain < 0.001:  # Small threshold to allow more splits
         return DecisionNode(value=np.argmax(np.bincount(y)))
     
     # Split data
     left_mask = X[:, feature] <= threshold
     right_mask = ~left_mask
     
-    # Don't split if either branch would be empty
-    if sum(left_mask) == 0 or sum(right_mask) == 0:
+    # Don't split if either branch would be empty or too small
+    if sum(left_mask) < 2 or sum(right_mask) < 2:
         return DecisionNode(value=np.argmax(np.bincount(y)))
     
     # Recursively build subtrees
     left = build_tree(X[left_mask], y[left_mask], depth+1, max_depth)
     right = build_tree(X[right_mask], y[right_mask], depth+1, max_depth)
+    
+    # Post-processing: If both children are leaf nodes with the same value,
+    # replace this node with a leaf node
+    if left.value is not None and right.value is not None and left.value == right.value:
+        return DecisionNode(value=left.value)
     
     return DecisionNode(feature=feature, threshold=threshold, left=left, right=right)
 

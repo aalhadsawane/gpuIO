@@ -81,7 +81,7 @@ mkdir -p "${DUMP_DIR}"
 mkdir -p "${CSV_DIR}"
 
 # Find the next available RunN directory by finding the maximum existing run number
-run_num=1
+run_num=0
 for dir in "${CSV_DIR}"/Run*; do
     if [ -d "$dir" ]; then
         current_num=$(basename "$dir" | sed 's/Run//')
