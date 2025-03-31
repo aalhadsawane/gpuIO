@@ -101,15 +101,23 @@ def visualize_tree(tree, feature_names, class_names, filename):
             label = f"{class_names[node.value]}"
             dot.node(str(parent_id), label, style='filled', color=color, fontcolor='black')
         else:
-            label = f"{feature_names[node.feature]}\n<= {node.threshold:.2f}"
+            # Convert block size from bytes to KB if this is the block size feature
+            threshold_val = node.threshold
+            if feature_names[node.feature] == 'Block Size (bytes)':
+                threshold_val = threshold_val / 1024  # Convert to KB
+                label = f"Block Size (KB)\n<= {threshold_val:.1f}"
+            else:
+                label = f"{feature_names[node.feature]}\n<= {threshold_val:.2f}"
+            
             dot.node(str(parent_id), label, shape='box')
             
-            # Add left and right children
-            dot.edge(str(parent_id), str(node_id))
+            # Add left child with "True" label (condition is true)
+            dot.edge(str(parent_id), str(node_id), label="True")
             nodes.append((node.left, node_id))
             node_id += 1
             
-            dot.edge(str(parent_id), str(node_id))
+            # Add right child with "False" label (condition is false)
+            dot.edge(str(parent_id), str(node_id), label="False")
             nodes.append((node.right, node_id))
             node_id += 1
     
@@ -135,13 +143,22 @@ def extract_rules(node, feature_names, class_names, path=None):
         return [{"path": path.copy(), "decision": node.value, "class": class_names[node.value]}]
     
     rules = []
-    # Left branch
-    path.append(f"{feature_names[node.feature]} <= {node.threshold:.2f}")
+    
+    # Convert block size from bytes to KB if this is the block size feature
+    threshold_val = node.threshold
+    feature_label = feature_names[node.feature]
+    
+    if feature_names[node.feature] == 'Block Size (bytes)':
+        threshold_val = threshold_val / 1024  # Convert to KB
+        feature_label = 'Block Size (KB)'
+    
+    # Left branch (True branch - condition is met)
+    path.append(f"{feature_label} <= {threshold_val:.1f} [TRUE]")
     rules.extend(extract_rules(node.left, feature_names, class_names, path))
     path.pop()
     
-    # Right branch
-    path.append(f"{feature_names[node.feature]} > {node.threshold:.2f}")
+    # Right branch (False branch - condition is not met)
+    path.append(f"{feature_label} > {threshold_val:.1f} [FALSE]")
     rules.extend(extract_rules(node.right, feature_names, class_names, path))
     path.pop()
     

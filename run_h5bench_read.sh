@@ -1,9 +1,9 @@
 #!/bin/bash
-# Script: run_h5bench.sh
-# Purpose: Run h5bench experiments varying IO threads, block size, and dataset size.
-#          Capture complete benchmark output (e.g., write time, metadata time, etc.)
+# Script: run_h5bench_read.sh
+# Purpose: Run h5bench READ experiments varying IO threads, block size, and dataset size.
+#          Capture complete benchmark output (e.g., read time, metadata time, etc.)
 #          for both GPU direct and CPU copy modes.
-#          Results are stored in benchmark_results.csv.
+#          Results are stored in read_benchmark_results.csv.
 
 # Check for required dependencies
 command -v bc >/dev/null 2>&1 || { echo >&2 "Error: bc is required for calculations but not installed. Please install bc and try again."; exit 1; }
@@ -51,8 +51,6 @@ echo "BLOCK_SIZES: ${BLOCK_SIZES[*]}"
 echo "DATASET_SIZES: ${DATASET_SIZES[*]}"
 echo "MODES: ${MODES[*]}"
 echo "COMPUTE_TIME: ${COMPUTE_TIME:-4} (default: 4)"
-# Using only SYNC mode, removing IO_MODES entirely
-# echo "IO_MODES: ${IO_MODES[*]}"
 
 # Validate required variables
 if [ -z "$CSV_DIR" ]; then
@@ -100,10 +98,17 @@ mkdir -p "${new_run_dir}"
 hostname > "${new_run_dir}/nodename.txt"
 echo "Created nodename.txt with hostname in ${new_run_dir}"
 
+# Create experiment_params.txt with READ BENCHMARKS header and config contents
+echo "READ BENCHMARKS" > "${new_run_dir}/experiment_params.txt"
+echo "================" >> "${new_run_dir}/experiment_params.txt"
+echo "" >> "${new_run_dir}/experiment_params.txt"
+cat "$config_file" >> "${new_run_dir}/experiment_params.txt"
+echo "Created experiment_params.txt in ${new_run_dir}"
+
 # --- Output CSV File ---
 output_csv="${new_run_dir}/raw_output.csv"
-# Create the CSV file with header - removing io_mode from the header
-echo "mode,io_threads,block_size,dataset_size,ranks,compute_time,write_size,raw_write_time,metadata_time,h5fcreate_time,h5fflush_time,h5fclose_time,completion_time,raw_write_rate,observed_write_rate" > "${output_csv}"
+# Create the CSV file with header - this is for READ operations
+echo "mode,io_threads,block_size,dataset_size,ranks,compute_time,read_size,raw_read_time,metadata_time,raw_read_rate,observed_read_rate" > "${output_csv}"
 
 # Ensure the file exists and is writable
 if [ ! -f "${output_csv}" ]; then
@@ -122,8 +127,7 @@ for mode in "${MODES[@]}"; do
         export LEGATE_IO_USE_VFD_GDS=0
     fi
 
-    # Remove the IO_MODES loop completely and always run in SYNC mode
-    echo "Testing with I/O mode: SYNC (fixed)"
+    echo "Testing READ operations with I/O mode: SYNC (fixed)"
     
     for io_threads in "${IO_THREADS[@]}"; do
         for block_size in "${BLOCK_SIZES[@]}"; do
@@ -154,7 +158,7 @@ for mode in "${MODES[@]}"; do
                 DIM_3=1
                 
                 # Calculate expected data size per process and total
-                # Each process will write num_particles * 32 bytes * timesteps
+                # Each process will read num_particles * 32 bytes * timesteps
                 per_process_bytes=$(echo "$num_particles * 32 * $timesteps" | bc)
                 per_process_mb=$(echo "scale=2; $per_process_bytes / 1048576" | bc)
                 total_mb=$(echo "scale=2; $per_process_mb * $io_threads" | bc)
@@ -170,21 +174,41 @@ for mode in "${MODES[@]}"; do
                 echo "  Expected data size per process: ~${per_process_bytes} bytes (~${per_process_mb} MB)"
                 echo "  Expected total data size: ~${total_mb} MB (${io_threads} processes × ${timesteps} timesteps)"
 
-                # For the simple approach with mpirun + h5bench_write
-                output_file="${DUMP_DIR}/output_${mode}_${io_threads}_${block_size}_${dataset_size}.h5"
-                log_file="${DUMP_DIR}/log_${mode}_${io_threads}_${block_size}_${dataset_size}.txt"
-                run_dir="${DUMP_DIR}/runs_${mode}_${io_threads}_${block_size}_${dataset_size}"
+                # For the simple approach with mpirun + h5bench_read
+                input_file="${DUMP_DIR}/input_${mode}_${io_threads}_${block_size}_${dataset_size}.h5"
+                output_file="${DUMP_DIR}/output_read_${mode}_${io_threads}_${block_size}_${dataset_size}.txt"
+                log_file="${DUMP_DIR}/log_read_${mode}_${io_threads}_${block_size}_${dataset_size}.txt"
+                run_dir="${DUMP_DIR}/runs_read_${mode}_${io_threads}_${block_size}_${dataset_size}"
                 
                 # Create the run directory and ensure it exists
                 mkdir -p "$run_dir"
                 
-                # Remove any existing output files to prevent issues
+                # Remove any existing input/output files to prevent issues
+                rm -f "$input_file"
                 rm -f "$output_file"
                 
-                # Create a text configuration file for h5bench_write - this is our primary approach now
-                text_config="${run_dir}/h5bench.cfg"
-                cat > "$text_config" << EOF
+                # Create a text configuration file for h5bench - first for WRITE to create input file
+                write_config="${run_dir}/h5bench_write.cfg"
+                cat > "$write_config" << EOF
 IO_OPERATION=WRITE
+MEM_PATTERN=CONTIG
+FILE_PATTERN=CONTIG
+NUM_PARTICLES=${num_particles}
+TIMESTEPS=${timesteps}
+NUM_DIMS=3
+DIM_1=${DIM_1}
+DIM_2=${DIM_2}
+DIM_3=${DIM_3}
+BLOCK_SIZE=${block_size}
+COLLECTIVE_DATA=YES
+COLLECTIVE_METADATA=YES
+EMULATED_COMPUTE_TIME_PER_TIMESTEP=0s
+EOF
+
+                # Create the read configuration
+                read_config="${run_dir}/h5bench_read.cfg"
+                cat > "$read_config" << EOF
+IO_OPERATION=READ
 MEM_PATTERN=CONTIG
 FILE_PATTERN=CONTIG
 NUM_PARTICLES=${num_particles}
@@ -199,72 +223,81 @@ COLLECTIVE_METADATA=YES
 EMULATED_COMPUTE_TIME_PER_TIMESTEP=${COMPUTE_TIME:-4s}
 EOF
 
-                # Also create a JSON configuration file (for potential use later)
-                json_config="${run_dir}/h5bench.json"
-                cat > "$json_config" << EOF
-{
-  "IO_OPERATION": "WRITE",
-  "MEM_PATTERN": "CONTIG",
-  "FILE_PATTERN": "CONTIG",
-  "NUM_PARTICLES": "${num_particles}",
-  "TIMESTEPS": "${timesteps}",
-  "NUM_DIMS": "3",
-  "DIM_1": "${DIM_1}",
-  "DIM_2": "${DIM_2}",
-  "DIM_3": "${DIM_3}",
-  "BLOCK_SIZE": "${block_size}",
-  "COLLECTIVE_DATA": "YES",
-  "COLLECTIVE_METADATA": "YES",
-  "EMULATED_COMPUTE_TIME_PER_TIMESTEP": "${COMPUTE_TIME:-4s}"
-}
-EOF
-
                 # Ensure files have proper permissions
-                chmod 644 "$text_config"
-                chmod 644 "$json_config"
+                chmod 644 "$write_config"
+                chmod 644 "$read_config"
                 
-                # Check if h5bench_write exists and run the benchmark
+                # Check if h5bench_write and h5bench_read exist
                 if [ ! -f "./h5bench_write" ]; then
                     echo "ERROR: h5bench_write executable not found in current directory!"
                     continue
                 fi
                 
+                if [ ! -f "./h5bench_read" ]; then
+                    echo "ERROR: h5bench_read executable not found in current directory!"
+                    continue
+                fi
+                
+                # First, create the input file using h5bench_write
+                echo "Creating input file for read benchmark..."
+                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write ${write_config} ${input_file}"
+                # Use CPU mode for file creation to avoid any potential issues
+                unset GPUDIRECT_STORAGE
+                export LEGATE_IO_USE_VFD_GDS=0
+                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write "${write_config}" "${input_file}" > /dev/null 2>&1
+                write_status=$?
+                
+                # Re-set the GPU mode if needed
+                if [ "$mode" == "GPU" ]; then
+                    export GPUDIRECT_STORAGE=1
+                    export LEGATE_IO_USE_VFD_GDS=1
+                fi
+                
+                # Check if input file was created successfully
+                if [ $write_status -ne 0 ] || [ ! -f "$input_file" ]; then
+                    echo "ERROR: Failed to create input file for read benchmark"
+                    continue
+                fi
+                
+                echo "Input file created successfully. Starting read benchmark..."
+                
                 # Output for debug info
                 echo "Configuration file:"
-                cat "$text_config"
+                cat "$read_config"
                 echo ""
                 
-                # Run the benchmark using mpirun + h5bench_write with the text config file
-                echo "Running benchmark: Mode=$mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
+                # Run the read benchmark using mpirun + h5bench_read with the text config file
+                echo "Running READ benchmark: Mode=$mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
                 echo "Benchmark log will be saved to: ${log_file}"
-                echo "Configuration file: ${text_config}"
+                echo "Configuration file: ${read_config}"
                 echo "Emulated compute time setting: ${COMPUTE_TIME:-4s} seconds"
-                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write ${text_config} ${output_file}"
-                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write "${text_config}" "${output_file}" > "${log_file}" 2>&1
+                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_read ${read_config} ${input_file}"
+                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_read "${read_config}" "${input_file}" > "${log_file}" 2>&1
                 benchmark_status=$?
                 
                 # Check if the benchmark succeeded
                 if [ $benchmark_status -ne 0 ]; then
-                    echo "WARNING: Benchmark exited with non-zero status: $benchmark_status"
+                    echo "WARNING: Read benchmark exited with non-zero status: $benchmark_status"
                     echo "Error details (first 20 lines):"
                     head -20 "$log_file"
                     echo "..."
                     echo "Last 10 lines of log:"
                     tail -10 "$log_file"
                 else
-                    echo "Benchmark completed successfully with exit code 0"
-                    # Clean up the output H5 file after successful completion
-                    if [ -f "$output_file" ]; then
-                        # Check if the file is still being written to
-                        if lsof "$output_file" > /dev/null 2>&1; then
-                            echo "Warning: File is still in use, waiting for it to be fully closed..."
-                            sleep 2
-                        fi
-                        echo "Cleaning up output file: $output_file"
-                        rm -f "$output_file"
-                    else
-                        echo "Warning: Output file not found for cleanup: $output_file"
+                    echo "Read benchmark completed successfully with exit code 0"
+                fi
+                
+                # Clean up the input file after the read benchmark completes
+                if [ -f "$input_file" ]; then
+                    # Check if the file is still being written to
+                    if lsof "$input_file" > /dev/null 2>&1; then
+                        echo "Warning: File is still in use, waiting for it to be fully closed..."
+                        sleep 2
                     fi
+                    echo "Cleaning up input file: $input_file"
+                    rm -f "$input_file"
+                else
+                    echo "Warning: Input file not found for cleanup: $input_file"
                 fi
                 
                 # Create a directory for storing outputs
@@ -274,16 +307,12 @@ EOF
                 
                 # Initialize metrics
                 ranks="$io_threads"
-                raw_write_rate="0 MB/s"
-                observed_write_rate="0 MB/s"
+                raw_read_rate="0 MB/s"
+                observed_read_rate="0 MB/s"
                 compute_time="${COMPUTE_TIME:-4}"  # Use the configured compute time directly
-                write_size="0 MB"
-                raw_write_time="0"
+                read_size="0 MB"
+                raw_read_time="0"
                 metadata_time="0"
-                h5fcreate_time="0"
-                h5fflush_time="0"
-                h5fclose_time="0"
-                completion_time="0"
                 
                 # Extract metrics from log file
                 if [ -f "$log_file" ]; then
@@ -296,7 +325,7 @@ EOF
                     else
                         echo "⚠️ Emulated compute time setting was NOT found in benchmark output"
                         echo "Checking benchmark configuration file format..."
-                        if grep -q "EMULATED_COMPUTE_TIME_PER_TIMESTEP" "$text_config"; then
+                        if grep -q "EMULATED_COMPUTE_TIME_PER_TIMESTEP" "$read_config"; then
                             echo "✓ EMULATED_COMPUTE_TIME_PER_TIMESTEP=${COMPUTE_TIME:-4} is present in config file"
                         else
                             echo "❌ EMULATED_COMPUTE_TIME_PER_TIMESTEP is missing from config file"
@@ -318,35 +347,26 @@ EOF
                         echo "❌ No total emulated compute time reported in results"
                     fi
                     
-                    # Extract metrics if available
-                    if grep -q "write rate" "$log_file"; then
+                    # Extract metrics if available - note the changes in the output format for read benchmarks
+                    if grep -q "read rate" "$log_file"; then
                         echo "Performance metrics found in log file"
                         
                         # Try to extract key metrics
-                        # compute_time is now set directly from config, not extracted
-                        write_size=$(grep -i "Total write size:" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB")
-                        raw_write_time=$(grep -i "Raw write time:" "$log_file" | awk '{print $4}' || echo "0")
+                        read_size=$(grep -i "Total read size:" "$log_file" | awk '{print $4 " " $5}' || echo "0 MB")
+                        raw_read_time=$(grep -i "Raw read time:" "$log_file" | awk '{print $4}' || echo "0")
                         metadata_time=$(grep -i "Metadata time:" "$log_file" | awk '{print $3}' || echo "0")
-                        h5fcreate_time=$(grep -i "H5Fcreate() time:" "$log_file" | awk '{print $3}' || echo "0")
-                        h5fflush_time=$(grep -i "H5Fflush() time:" "$log_file" | awk '{print $3}' || echo "0")
-                        h5fclose_time=$(grep -i "H5Fclose() time:" "$log_file" | awk '{print $3}' || echo "0")
-                        completion_time=$(grep -i "Observed completion time:" "$log_file" | awk '{print $4}' || echo "0")
-                        # Capture the full write rate string including units
-                        raw_write_rate=$(grep -i "Raw write rate:" "$log_file" | sed 's/.*Raw write rate: *//' || echo "0 MB/s")
-                        observed_write_rate=$(grep -i "Observed write rate:" "$log_file" | sed 's/.*Observed write rate: *//' || echo "0 MB/s")
+                        # Capture the full read rate string including units
+                        raw_read_rate=$(grep -i "Raw read rate:" "$log_file" | sed 's/.*Raw read rate: *//' || echo "0 MB/s")
+                        observed_read_rate=$(grep -i "Observed read rate:" "$log_file" | sed 's/.*Observed read rate: *//' || echo "0 MB/s")
                         ranks=$(grep -i "Total number of ranks" "$log_file" | awk '{print $5}' || echo "$io_threads")
                         
                         echo "Extracted metrics:"
                         echo "  Compute time (from config): $compute_time"
-                        echo "  Write size: $write_size"
-                        echo "  Raw write time: $raw_write_time"
+                        echo "  Read size: $read_size"
+                        echo "  Raw read time: $raw_read_time"
                         echo "  Metadata time: $metadata_time"
-                        echo "  H5Fcreate time: $h5fcreate_time"
-                        echo "  H5Fflush time: $h5fflush_time"
-                        echo "  H5Fclose time: $h5fclose_time"
-                        echo "  Completion time: $completion_time"
-                        echo "  Raw write rate: $raw_write_rate"
-                        echo "  Observed write rate: $observed_write_rate"
+                        echo "  Raw read rate: $raw_read_rate"
+                        echo "  Observed read rate: $observed_read_rate"
                         echo "  Ranks: $ranks"
                     else
                         echo "No performance metrics found in log file"
@@ -355,13 +375,13 @@ EOF
                     echo "Log file not found: $log_file"
                 fi
                 
-                # Append the results to the CSV file
-                echo "$mode,$io_threads,$block_size,$dataset_size,$ranks,$compute_time,\"$write_size\",$raw_write_time,$metadata_time,$h5fcreate_time,$h5fflush_time,$h5fclose_time,$completion_time,\"$raw_write_rate\",\"$observed_write_rate\"" >> "$output_csv"
+                # Append the results to the CSV file - note the change to read metrics
+                echo "$mode,$io_threads,$block_size,$dataset_size,$ranks,$compute_time,\"$read_size\",$raw_read_time,$metadata_time,\"$raw_read_rate\",\"$observed_read_rate\"" >> "$output_csv"
 
                 # Print a summary
                 echo "Results saved to CSV for Mode=$mode, I/O Threads=$io_threads, Block Size=$block_size, Dataset Size=$dataset_size"
-                echo "Raw Write Rate: $raw_write_rate"
-                echo "Observed Write Rate: $observed_write_rate"
+                echo "Raw Read Rate: $raw_read_rate"
+                echo "Observed Read Rate: $observed_read_rate"
                 echo ""
 
             done
@@ -369,34 +389,34 @@ EOF
     done
 done
 
-echo "Benchmarking complete. Results saved in $output_csv"
+echo "READ Benchmarking complete. Results saved in $output_csv"
 
 # Generate summary of the best performers
 echo ""
-echo "===== BENCHMARK SUMMARY ====="
+echo "===== READ BENCHMARK SUMMARY ====="
 echo ""
 
 # For GPU mode
-echo "Top 3 GPU Raw Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $14}' "$output_csv" | sort -t: -k2 -nr | head -3
+echo "Top 3 GPU Raw Read Rates:"
+awk -F, 'NR>1 && $1=="GPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $10}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 echo ""
-echo "Top 3 GPU Observed Write Rates:"
-awk -F, 'NR>1 && $1=="GPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $15}' "$output_csv" | sort -t: -k2 -nr | head -3
+echo "Top 3 GPU Observed Read Rates:"
+awk -F, 'NR>1 && $1=="GPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $11}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 # For CPU mode
 echo ""
-echo "Top 3 CPU Raw Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $14}' "$output_csv" | sort -t: -k2 -nr | head -3
+echo "Top 3 CPU Raw Read Rates:"
+awk -F, 'NR>1 && $1=="CPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $10}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 echo ""
-echo "Top 3 CPU Observed Write Rates:"
-awk -F, 'NR>1 && $1=="CPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $15}' "$output_csv" | sort -t: -k2 -nr | head -3
+echo "Top 3 CPU Observed Read Rates:"
+awk -F, 'NR>1 && $1=="CPU" {print $2 " threads, " $3 " block size, " $4 " dataset: " $11}' "$output_csv" | sort -t: -k2 -nr | head -3
 
 # Summary by thread count (average across all configurations)
 echo ""
 echo "Average Performance by Thread Count:"
-echo "Threads,Raw_Write_Rates,Observed_Write_Rates"
+echo "Threads,Raw_Read_Rates,Observed_Read_Rates"
 for threads in "${IO_THREADS[@]}"; do
     # Calculate number of samples for this thread count
     count=$(awk -F, -v t="$threads" 'NR>1 && $2==t {count++} END {print (count>0 ? count : 0)}' "$output_csv")
@@ -408,8 +428,8 @@ for threads in "${IO_THREADS[@]}"; do
     fi
     
     # List all raw rates for this thread count (preserving units)
-    raw_rates=$(awk -F, -v t="$threads" 'NR>1 && $2==t {print $14}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
-    observed_rates=$(awk -F, -v t="$threads" 'NR>1 && $2==t {print $15}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    raw_rates=$(awk -F, -v t="$threads" 'NR>1 && $2==t {print $10}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    observed_rates=$(awk -F, -v t="$threads" 'NR>1 && $2==t {print $11}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
     
     echo "$threads,$raw_rates,$observed_rates"
 done
@@ -417,7 +437,7 @@ done
 # Summary by block size (average across all configurations)
 echo ""
 echo "Average Performance by Block Size:"
-echo "Block_Size,Raw_Write_Rates,Observed_Write_Rates"
+echo "Block_Size,Raw_Read_Rates,Observed_Read_Rates"
 for bs in "${BLOCK_SIZES[@]}"; do
     # Calculate number of samples for this block size
     count=$(awk -F, -v b="$bs" 'NR>1 && $3==b {count++} END {print (count>0 ? count : 0)}' "$output_csv")
@@ -429,11 +449,11 @@ for bs in "${BLOCK_SIZES[@]}"; do
     fi
     
     # List all raw rates for this block size (preserving units)
-    raw_rates=$(awk -F, -v b="$bs" 'NR>1 && $3==b {print $14}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
-    observed_rates=$(awk -F, -v b="$bs" 'NR>1 && $3==b {print $15}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    raw_rates=$(awk -F, -v b="$bs" 'NR>1 && $3==b {print $10}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
+    observed_rates=$(awk -F, -v b="$bs" 'NR>1 && $3==b {print $11}' "$output_csv" | tr '\n' ',' | sed 's/,$//')
     
     echo "$bs,$raw_rates,$observed_rates"
 done
 
 echo ""
-echo "===== END OF SUMMARY ====="
+echo "===== END OF READ SUMMARY ====="

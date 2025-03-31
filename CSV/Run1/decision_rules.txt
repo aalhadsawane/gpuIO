@@ -3,17 +3,15 @@ Decision Tree Analysis
 
 Summary:
 Total configurations analyzed: 140
-GPU better: 77 cases
-CPU better: 63 cases
+GPU better: 78 cases
+CPU better: 62 cases
 
 Decision Rules:
 ----------------
-Rule 1: IF Dataset Size (GB) <= 5.00 AND I/O Threads <= 8.00 AND Block Size (bytes) <= 65536.00 THEN GPU Better
-Rule 2: IF Dataset Size (GB) <= 5.00 AND I/O Threads <= 8.00 AND Block Size (bytes) > 65536.00 AND Block Size (bytes) <= 262144.00 THEN CPU Better
-Rule 3: IF Dataset Size (GB) <= 5.00 AND I/O Threads <= 8.00 AND Block Size (bytes) > 65536.00 AND Block Size (bytes) > 262144.00 THEN GPU Better
-Rule 4: IF Dataset Size (GB) <= 5.00 AND I/O Threads > 8.00 AND Block Size (bytes) <= 262144.00 AND Block Size (bytes) <= 65536.00 THEN CPU Better
-Rule 5: IF Dataset Size (GB) <= 5.00 AND I/O Threads > 8.00 AND Block Size (bytes) <= 262144.00 AND Block Size (bytes) > 65536.00 THEN GPU Better
-Rule 6: IF Dataset Size (GB) <= 5.00 AND I/O Threads > 8.00 AND Block Size (bytes) > 262144.00 THEN CPU Better
-Rule 7: IF Dataset Size (GB) > 5.00 AND Block Size (bytes) <= 524288.00 AND I/O Threads <= 2.00 THEN GPU Better
-Rule 8: IF Dataset Size (GB) > 5.00 AND Block Size (bytes) <= 524288.00 AND I/O Threads > 2.00 THEN CPU Better
-Rule 9: IF Dataset Size (GB) > 5.00 AND Block Size (bytes) > 524288.00 THEN CPU Better
+Rule 1: IF Dataset Size (GB) <= 5.0 [TRUE] AND I/O Threads <= 8.0 [TRUE] THEN GPU Better
+Rule 2: IF Dataset Size (GB) <= 5.0 [TRUE] AND I/O Threads > 8.0 [FALSE] AND Block Size (KB) <= 256.0 [TRUE] AND Block Size (KB) <= 64.0 [TRUE] THEN CPU Better
+Rule 3: IF Dataset Size (GB) <= 5.0 [TRUE] AND I/O Threads > 8.0 [FALSE] AND Block Size (KB) <= 256.0 [TRUE] AND Block Size (KB) > 64.0 [FALSE] THEN GPU Better
+Rule 4: IF Dataset Size (GB) <= 5.0 [TRUE] AND I/O Threads > 8.0 [FALSE] AND Block Size (KB) > 256.0 [FALSE] THEN CPU Better
+Rule 5: IF Dataset Size (GB) > 5.0 [FALSE] AND Block Size (KB) <= 512.0 [TRUE] AND I/O Threads <= 2.0 [TRUE] THEN GPU Better
+Rule 6: IF Dataset Size (GB) > 5.0 [FALSE] AND Block Size (KB) <= 512.0 [TRUE] AND I/O Threads > 2.0 [FALSE] THEN CPU Better
+Rule 7: IF Dataset Size (GB) > 5.0 [FALSE] AND Block Size (KB) > 512.0 [FALSE] THEN CPU Better

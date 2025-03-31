@@ -46,7 +46,7 @@ The steps ahead will be reused every experiment.
 Run benchmarking script to the conf file mentioned above *in background* 
 
 ```bash
-nohup ./run_h5bench.sh > h5bench_output.log 2>&1 &
+nohup ./run_h5bench_write.sh > h5bench_output.log 2>&1 &
 ```
 
 The output (raw_output.csv) is stored in a new folder `/home/gpuio/gpuIO/CSV/Run*/` 
