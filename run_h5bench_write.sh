@@ -120,13 +120,24 @@ fi
 
 for mode in "${MODES[@]}"; do
     if [ "$mode" == "GPU" ]; then
-        echo "Setting up for GPU direct transfers..."
+        echo "Setting up for GPU direct transfers (vfd_gds)..."
+        # Enable GPU Direct Storage with vfd_gds plugin
         export GPUDIRECT_STORAGE=1
-        export LEGATE_IO_USE_VFD_GDS=1
+        # Set HDF5 to use vfd_gds driver
+        export HDF5_DRIVER=gds
+        # Set HDF5 plugin path to include vfd_gds plugin
+        export HDF5_PLUGIN_PATH="/home/gpuio/gpuIO/hdf5_install/lib:$HDF5_PLUGIN_PATH"
+        echo "  - GPUDIRECT_STORAGE=1"
+        echo "  - HDF5_DRIVER=gds (vfd_gds plugin enabled)"
+        echo "  - HDF5_PLUGIN_PATH=/home/gpuio/gpuIO/hdf5_install/lib"
     else
-        echo "Setting up for CPU copy (fallback mode)..."
+        echo "Setting up for CPU copy (traditional mode)..."
+        # Disable GPU Direct Storage
         unset GPUDIRECT_STORAGE
-        export LEGATE_IO_USE_VFD_GDS=0
+        # Use default HDF5 driver (no GDS)
+        unset HDF5_DRIVER
+        echo "  - GPUDIRECT_STORAGE disabled"
+        echo "  - HDF5_DRIVER unset (using default)"
     fi
 
     # Remove the IO_MODES loop completely and always run in SYNC mode
@@ -231,8 +242,14 @@ EOF
                 chmod 644 "$json_config"
                 
                 # Check if h5bench_write exists and run the benchmark
-                if [ ! -f "./h5bench_write" ]; then
-                    echo "ERROR: h5bench_write executable not found in current directory!"
+                # We're in BUILD_DIR, so go back to project root
+                PROJECT_ROOT="$(dirname "$(dirname "$(dirname "$(pwd)")")")"
+                H5BENCH_EXEC="$PROJECT_ROOT/benchmarks/h5bench/build_cuda/h5bench_write"
+                if [ ! -f "$H5BENCH_EXEC" ]; then
+                    echo "ERROR: h5bench_write executable not found at $H5BENCH_EXEC!"
+                    echo "Current directory: $(pwd)"
+                    echo "Project root: $PROJECT_ROOT"
+                    ls -la "$PROJECT_ROOT/benchmarks/h5bench/build_cuda/" || echo "build_cuda directory not found"
                     continue
                 fi
                 
@@ -246,8 +263,8 @@ EOF
                 echo "Benchmark log will be saved to: ${log_file}"
                 echo "Configuration file: ${text_config}"
                 echo "Emulated compute time setting: ${COMPUTE_TIME:-4s} seconds"
-                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write ${text_config} ${output_file}"
-                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write "${text_config}" "${output_file}" > "${log_file}" 2>&1
+                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} $H5BENCH_EXEC ${text_config} ${output_file}"
+                nohup mpirun --use-hwthread-cpus -n ${io_threads} "$H5BENCH_EXEC" "${text_config}" "${output_file}" > "${log_file}" 2>&1
                 benchmark_status=$?
                 
                 # Check if the benchmark succeeded

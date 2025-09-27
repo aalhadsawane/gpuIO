@@ -1,0 +1,69 @@
+name: 📜 Source
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.head_ref }}-source
+  cancel-in-progress: true
+
+jobs:
+  style:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Non-ASCII Characters
+      run: .github/workflows/source/hasNonASCII
+    - name: TABs
+      run: .github/workflows/source/hasTabs
+    - name: End-of-Line whitespaces
+      run: .github/workflows/source/hasEOLwhiteSpace
+    - name: PEP8
+      run: |
+        python3 -m pip install -U flake8
+        python3 -m flake8 --exclude=thirdParty .
+
+  static-analysis:
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
+    steps:
+    - uses: actions/checkout@v3
+    - name: pyflakes
+      run: |
+        python3 -m pip install -U pyflakes
+        python3 -m pyflakes docs/ examples/ test/ setup.py
+
+  documentation:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: s-weigand/setup-conda@v1.1.1
+      with:
+        update-conda: true
+        conda-channels: conda-forge
+    - name: Install
+      run: conda install -c conda-forge doxygen
+    - name: Doxygen
+      run: .github/workflows/source/buildDoxygen
+
+  urls:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+    - uses: actions/checkout@v3
+    - name: urls-checker
+      uses: urlstechie/urlchecker-action@master
+      with:
+        # A comma-separated list of file types to cover in the URL checks
+        file_types: .md,.py,.rst,.hpp,.cpp
+        # Choose whether to include file with no URLs in the prints.
+        print_all: false
+        # The timeout seconds to provide to requests, defaults to 5 seconds
+        timeout: 5
+        # How many times to retry a failed request (each is logged, defaults to 1)
+        retry_count: 3
+        # A comma separated links to exclude during URL checks
+        #exclude_urls: url1,url2
+        # A comma separated patterns to exclude during URL checks
+        #exclude_patterns: url1,url2
+        # choose if the force pass or not
+        force_pass : true

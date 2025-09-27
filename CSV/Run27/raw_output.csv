@@ -1,0 +1,3 @@
+mode,io_threads,block_size,dataset_size,ranks,compute_time,write_size,raw_write_time,metadata_time,h5fcreate_time,h5fflush_time,h5fclose_time,completion_time,raw_write_rate,observed_write_rate
+GPU,1,65536,1GB,1,4s,"1.000 GB",0.701,0.001,0.001,0.253,0.001,4.966,"1.427 GB/s ","1.035 GB/s"
+GPU,1,65536,5GB,1,4s,"5.000 GB",3.341,0.001,0.001,1.423,0.001,8.780,"1.496 GB/s ","1.046 GB/s"

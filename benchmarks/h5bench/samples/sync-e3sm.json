@@ -1,0 +1,25 @@
+{
+    "mpi": {
+        "command": "mpirun",
+        "ranks": "8",
+        "configuration": "--allow-run-as-root --oversubscribe"
+    },
+    "vol": {
+        
+    },
+    "file-system": {
+
+    },
+    "directory": "storage",
+    "benchmarks": [
+        {
+            "benchmark": "e3sm",
+            "file": "test.h5",
+            "configuration": {
+                "k": "",
+                "r": "25",
+                "map": "../../e3sm/datasets/map_f_case_16p.h5"
+            }
+        }
+    ]
+}

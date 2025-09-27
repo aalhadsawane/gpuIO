@@ -118,13 +118,24 @@ fi
 
 for mode in "${MODES[@]}"; do
     if [ "$mode" == "GPU" ]; then
-        echo "Setting up for GPU direct transfers..."
+        echo "Setting up for GPU direct transfers (vfd_gds)..."
+        # Enable GPU Direct Storage with vfd_gds plugin
         export GPUDIRECT_STORAGE=1
-        export LEGATE_IO_USE_VFD_GDS=1
+        # Set HDF5 to use vfd_gds driver
+        export HDF5_DRIVER=gds
+        # Set HDF5 plugin path to include vfd_gds plugin
+        export HDF5_PLUGIN_PATH="/home/gpuio/gpuIO/hdf5_install/lib:$HDF5_PLUGIN_PATH"
+        echo "  - GPUDIRECT_STORAGE=1"
+        echo "  - HDF5_DRIVER=gds (vfd_gds plugin enabled)"
+        echo "  - HDF5_PLUGIN_PATH=/home/gpuio/gpuIO/hdf5_install/lib"
     else
-        echo "Setting up for CPU copy (fallback mode)..."
+        echo "Setting up for CPU copy (traditional mode)..."
+        # Disable GPU Direct Storage
         unset GPUDIRECT_STORAGE
-        export LEGATE_IO_USE_VFD_GDS=0
+        # Use default HDF5 driver (no GDS)
+        unset HDF5_DRIVER
+        echo "  - GPUDIRECT_STORAGE disabled"
+        echo "  - HDF5_DRIVER unset (using default)"
     fi
 
     echo "Testing READ operations with I/O mode: SYNC (fixed)"
@@ -228,29 +239,39 @@ EOF
                 chmod 644 "$read_config"
                 
                 # Check if h5bench_write and h5bench_read exist
-                if [ ! -f "./h5bench_write" ]; then
-                    echo "ERROR: h5bench_write executable not found in current directory!"
+                # We're in BUILD_DIR, so go back to project root
+                PROJECT_ROOT="$(dirname "$(dirname "$(dirname "$(pwd)")")")"
+                H5BENCH_WRITE_EXEC="$PROJECT_ROOT/benchmarks/h5bench/build_cuda/h5bench_write"
+                H5BENCH_READ_EXEC="$PROJECT_ROOT/benchmarks/h5bench/build_cuda/h5bench_read"
+                if [ ! -f "$H5BENCH_WRITE_EXEC" ]; then
+                    echo "ERROR: h5bench_write executable not found at $H5BENCH_WRITE_EXEC!"
+                    echo "Current directory: $(pwd)"
+                    echo "Project root: $PROJECT_ROOT"
+                    ls -la "$PROJECT_ROOT/benchmarks/h5bench/build_cuda/" || echo "build_cuda directory not found"
                     continue
                 fi
                 
-                if [ ! -f "./h5bench_read" ]; then
-                    echo "ERROR: h5bench_read executable not found in current directory!"
+                if [ ! -f "$H5BENCH_READ_EXEC" ]; then
+                    echo "ERROR: h5bench_read executable not found at $H5BENCH_READ_EXEC!"
+                    echo "Current directory: $(pwd)"
+                    echo "Project root: $PROJECT_ROOT"
+                    ls -la "$PROJECT_ROOT/benchmarks/h5bench/build_cuda/" || echo "build_cuda directory not found"
                     continue
                 fi
                 
                 # First, create the input file using h5bench_write
                 echo "Creating input file for read benchmark..."
-                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write ${write_config} ${input_file}"
+                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} $H5BENCH_WRITE_EXEC ${write_config} ${input_file}"
                 # Use CPU mode for file creation to avoid any potential issues
                 unset GPUDIRECT_STORAGE
-                export LEGATE_IO_USE_VFD_GDS=0
-                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_write "${write_config}" "${input_file}" > /dev/null 2>&1
+                unset HDF5_DRIVER
+                mpirun --use-hwthread-cpus -n ${io_threads} "$H5BENCH_WRITE_EXEC" "${write_config}" "${input_file}" > /dev/null 2>&1
                 write_status=$?
                 
                 # Re-set the GPU mode if needed
                 if [ "$mode" == "GPU" ]; then
                     export GPUDIRECT_STORAGE=1
-                    export LEGATE_IO_USE_VFD_GDS=1
+                    export HDF5_DRIVER=gds
                 fi
                 
                 # Check if input file was created successfully
@@ -271,8 +292,8 @@ EOF
                 echo "Benchmark log will be saved to: ${log_file}"
                 echo "Configuration file: ${read_config}"
                 echo "Emulated compute time setting: ${COMPUTE_TIME:-4s} seconds"
-                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_read ${read_config} ${input_file}"
-                mpirun --use-hwthread-cpus -n ${io_threads} ./h5bench_read "${read_config}" "${input_file}" > "${log_file}" 2>&1
+                echo "RUNNING: mpirun --use-hwthread-cpus -n ${io_threads} $H5BENCH_READ_EXEC ${read_config} ${input_file}"
+                nohup mpirun --use-hwthread-cpus -n ${io_threads} "$H5BENCH_READ_EXEC" "${read_config}" "${input_file}" > "${log_file}" 2>&1
                 benchmark_status=$?
                 
                 # Check if the benchmark succeeded

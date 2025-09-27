@@ -1,0 +1,20 @@
+Decision Tree Analysis
+==================================================
+
+Summary:
+Total configurations analyzed: 140
+GPU better: 68 cases
+CPU better: 72 cases
+
+Decision Rules:
+----------------
+Rule 1: IF Dataset Size (GB) <= 10.0 [TRUE] AND I/O Threads <= 4.0 [TRUE] AND I/O Threads <= 1.0 [TRUE] AND Block Size (KB) <= 256.0 [TRUE] THEN CPU Better
+Rule 2: IF Dataset Size (GB) <= 10.0 [TRUE] AND I/O Threads <= 4.0 [TRUE] AND I/O Threads <= 1.0 [TRUE] AND Block Size (KB) > 256.0 [FALSE] THEN GPU Better
+Rule 3: IF Dataset Size (GB) <= 10.0 [TRUE] AND I/O Threads <= 4.0 [TRUE] AND I/O Threads > 1.0 [FALSE] THEN CPU Better
+Rule 4: IF Dataset Size (GB) <= 10.0 [TRUE] AND I/O Threads > 4.0 [FALSE] AND Block Size (KB) <= 512.0 [TRUE] THEN GPU Better
+Rule 5: IF Dataset Size (GB) <= 10.0 [TRUE] AND I/O Threads > 4.0 [FALSE] AND Block Size (KB) > 512.0 [FALSE] AND I/O Threads <= 8.0 [TRUE] THEN GPU Better
+Rule 6: IF Dataset Size (GB) <= 10.0 [TRUE] AND I/O Threads > 4.0 [FALSE] AND Block Size (KB) > 512.0 [FALSE] AND I/O Threads > 8.0 [FALSE] THEN CPU Better
+Rule 7: IF Dataset Size (GB) > 10.0 [FALSE] AND Block Size (KB) <= 64.0 [TRUE] THEN CPU Better
+Rule 8: IF Dataset Size (GB) > 10.0 [FALSE] AND Block Size (KB) > 64.0 [FALSE] AND Block Size (KB) <= 128.0 [TRUE] THEN GPU Better
+Rule 9: IF Dataset Size (GB) > 10.0 [FALSE] AND Block Size (KB) > 64.0 [FALSE] AND Block Size (KB) > 128.0 [FALSE] AND I/O Threads <= 8.0 [TRUE] THEN GPU Better
+Rule 10: IF Dataset Size (GB) > 10.0 [FALSE] AND Block Size (KB) > 64.0 [FALSE] AND Block Size (KB) > 128.0 [FALSE] AND I/O Threads > 8.0 [FALSE] THEN CPU Better

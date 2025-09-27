@@ -2,8 +2,12 @@
 build/
 **/build/
 **/build/*
-benchmarks/ 
-login.py
+benchmarks/h5bench/build/
+benchmarks/h5bench/build_cuda/
+hdf5_build/
+hdf5_install/
+vfd-gds/build/
+
 # Compiled files
 *.o
 *.obj
@@ -12,6 +16,7 @@ login.py
 *.a
 *.so
 *.dylib
+
 # Python cache files
 __pycache__/
 *.py[cod]
@@ -40,15 +45,24 @@ Thumbs.db
 
 # Dependencies
 deps/
-vendor/ __pycache__/
-*.py[cod]
-*.class
+vendor/
 
 # Ignore output directories
 dump/
 Results/
+benchmark_logs_*/
 
 # Ignore virtual environment
 venv/
 env/
 .venv/
+
+# Ignore test files
+*_test.log
+*_test*.log
+gpu_demon*.log
+h5bench_*_output.log
+h5bench_*_test*.log
+
+# Ignore login script
+login.py

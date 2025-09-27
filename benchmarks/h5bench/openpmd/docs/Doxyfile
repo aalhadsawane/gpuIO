@@ -1,0 +1,38 @@
+PROJECT_NAME      = "openPMD-api"
+XML_OUTPUT        = xml
+INPUT             = ../src ../include ../README.md
+EXCLUDE_PATTERNS  = *CommonADIOS1IOHandler.cpp
+
+# TAGFILES += "cppreference-doxygen-web.tag.xml=http://en.cppreference.com/w/"
+BUILTIN_STL_SUPPORT = YES
+
+GENERATE_LATEX    = NO
+GENERATE_MAN      = NO
+GENERATE_RTF      = NO
+CASE_SENSE_NAMES  = NO
+HTML_OUTPUT       = doxyhtml
+GENERATE_HTML     = YES
+GENERATE_XML      = YES
+GENERATE_TAGFILE  = openpmd-api-doxygen-web.tag.xml
+RECURSIVE         = YES
+#QUIET             = YES
+JAVADOC_AUTOBRIEF = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# "enable" all frontends and backends
+MACRO_EXPANSION   = YES
+PREDEFINED        = DOXYGEN_SHOULD_SKIP_THIS \
+                    openPMD_HAVE_MPI=1 \
+                    openPMD_HAVE_HDF5=1 \
+                    openPMD_HAVE_ADIOS1=1 \
+                    openPMD_HAVE_ADIOS2=1 \
+                    openPMD_HAVE_PYTHON=1 \
+                    OPENPMD_private:=private \
+                    OPENPMD_protected:=protected \
+                    __attribute__(x)= \
+                    __declspec(x)=
+
+# ideally, you want to warn on missing doc coverage!
+WARN_IF_UNDOCUMENTED = NO
+WARN_NO_PARAMDOC = NO
+# the ideal CI enforcing world: WARN_AS_ERROR = YES
